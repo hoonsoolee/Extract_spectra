@@ -1,0 +1,127 @@
+# ============================================================
+# Hyperspectral Field Crop Analysis - Configuration
+# ============================================================
+
+# --- Data Sources ---
+data:
+  # Local folder containing hyperspectral files
+  local_folder: null          # e.g., "C:/data/field_images"
+
+  # GitHub repository (alternative or additional source)
+  github:
+    repo: null                # e.g., "username/repository"
+    folder: ""                # Subfolder path in the repo, e.g., "data/2024"
+    token: null               # Personal access token (for private repos)
+    # Or set env variable: GITHUB_TOKEN
+
+  supported_formats: [".hdr", ".tif", ".tiff", ".h5", ".hdf5", ".mat"]
+  cache_dir: "./cache"        # Local cache for GitHub-downloaded files
+
+# --- Preprocessing ---
+preprocessing:
+  # Reflectance normalization
+  normalize: true             # Clip and scale data to [0, 1]
+  data_scale: null            # If raw DN values, divide by this (e.g., 10000 for Sentinel-2)
+
+  # Bad band / water absorption removal (wavelength ranges in nm)
+  remove_bad_bands: true
+  bad_band_ranges:
+    - [1340, 1460]            # Atmospheric water absorption
+    - [1790, 1960]            # Atmospheric water absorption
+
+  # Spectral smoothing (Savitzky-Golay)
+  smooth_spectra: false
+  smooth_window: 7            # Must be odd
+  smooth_polyorder: 2
+
+  # Spatial downsampling (for very large images)
+  spatial_downsample: 1       # 1=no downsampling, 2=halve resolution, etc.
+
+# --- Wavelengths ---
+# If not stored in file metadata, define manually
+wavelengths:
+  start: null                 # First band wavelength (nm), e.g., 400
+  end: null                   # Last band wavelength (nm), e.g., 1000
+  bands: null                 # Or provide explicit list: [400, 410, 420, ...]
+
+# --- Classification ---
+classification:
+  method: "hybrid"            # "hybrid" | "kmeans" | "supervised"
+
+  # ---- Hybrid Method (recommended for no-label scenarios) ----
+  # Step 1: Vegetation detection via NDVI
+  # Step 2: Shadow detection via brightness threshold
+  # Step 3: Optional K-means refinement within each segment
+  hybrid:
+    # Vegetation detection (NDVI)
+    ndvi_red_nm: 670          # Red band wavelength (nm) for NDVI
+    ndvi_nir_nm: 800          # NIR band wavelength (nm) for NDVI
+    ndvi_threshold: 0.15      # NDVI above this = vegetation
+
+    # Shadow detection
+    shadow_method: "brightness"   # "brightness" | "ratio"
+    brightness_threshold: 0.08    # Mean reflectance below this = shadow
+    # ratio method: (NIR - Blue) / (NIR + Blue + eps)
+    shadow_ratio_threshold: 0.05
+
+    # K-means refinement within each class (optional)
+    kmeans_refinement: true
+    n_clusters_sunlit: 3      # Sub-clusters within sunlit leaves
+    n_clusters_shadow: 2      # Sub-clusters within shadowed leaves
+    n_clusters_soil: 3        # Sub-clusters within soil/other
+    pca_components: 10        # PCA before K-means (0 = no PCA)
+
+  # ---- Pure K-means Method ----
+  kmeans:
+    n_clusters: 6             # Total number of clusters
+    pca_components: 15        # PCA dimensionality reduction before clustering
+    n_init: 10                # Number of K-means restarts
+    max_iter: 300
+    random_state: 42
+
+  # ---- Class definitions ----
+  classes:
+    - id: 0
+      name: "Background"
+      color: [20, 20, 20]
+    - id: 1
+      name: "Sunlit Leaves"
+      color: [34, 180, 34]
+    - id: 2
+      name: "Shadowed Leaves"
+      color: [10, 90, 10]
+    - id: 3
+      name: "Soil"
+      color: [139, 100, 43]
+    - id: 4
+      name: "Other"
+      color: [160, 160, 160]
+
+# --- Output ---
+output:
+  dir: "./output"             # Output directory (created if not exists)
+  save_classification_map: true
+  save_spectra_csv: true
+  save_report: true
+
+# --- Report Visualization ---
+report:
+  title: "Hyperspectral Field Crop Analysis"
+  author: ""
+
+  # RGB composite for visual reference
+  show_rgb_composite: true
+  rgb_red_nm: 660             # Wavelength (nm) mapped to red channel
+  rgb_green_nm: 550           # Wavelength (nm) mapped to green channel
+  rgb_blue_nm: 450            # Wavelength (nm) mapped to blue channel
+  rgb_percentile_stretch: [2, 98]   # Percentile contrast stretch
+
+  # Visualization
+  show_false_color: true      # CIR: NIR / Red / Green
+  show_spectral_plots: true
+  show_statistics: true
+  show_confusion_info: true   # Per-class pixel counts and percentages
+
+  # Interactive spectral plot: show ±1 std envelope
+  spectra_show_std: true
+  spectra_show_minmax: false
