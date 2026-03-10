@@ -30,6 +30,32 @@ SUNLIT_LEAF   = 1
 SHADOW_LEAF   = 2
 SOIL          = 3
 OTHER         = 4
+
+# High-contrast default colour palette (RGB 0-255).
+# Used when a class ID has no colour configured in config.yaml.
+# First 5 entries match the hybrid method class IDs for intuitive colours.
+_CLASS_PALETTE = [
+    [40,  40,  40 ],  # 0  Background   – near-black
+    [60,  200, 60 ],  # 1  Sunlit Leaf  – bright green
+    [20,  100, 20 ],  # 2  Shadow Leaf  – dark green
+    [160, 100, 40 ],  # 3  Soil         – brown
+    [70,  130, 180],  # 4  Other        – steel blue
+    [220, 20,  60 ],  # 5               – crimson
+    [255, 165, 0  ],  # 6               – orange
+    [138, 43,  226],  # 7               – violet
+    [0,   206, 209],  # 8               – dark turquoise
+    [255, 105, 180],  # 9               – hot pink
+    [255, 215, 0  ],  # 10              – gold
+    [30,  144, 255],  # 11              – dodger blue
+    [255, 69,  0  ],  # 12              – red-orange
+    [144, 238, 144],  # 13              – light green
+    [128, 0,   128],  # 14              – purple
+    [0,   128, 128],  # 15              – teal
+    [255, 0,   0  ],  # 16              – red
+    [0,   0,   205],  # 17              – medium blue
+    [50,  205, 50 ],  # 18              – lime green
+    [255, 255, 0  ],  # 19              – yellow
+]
 # ------------------------------------------------------------------ #
 
 
@@ -68,8 +94,14 @@ class HyperspectralClassifier:
             class_map = self._classify_hybrid(data, wavelengths)
         elif method == "kmeans":
             class_map = self._classify_kmeans(data)
+        elif method == "sam":
+            class_map = self._classify_sam(data, wavelengths, labels_csv)
         elif method == "supervised":
             class_map = self._classify_supervised(data, wavelengths, labels_csv)
+        elif method == "autoencoder":
+            class_map = self._classify_autoencoder(data)
+        elif method == "cnn":
+            class_map = self._classify_cnn(data, labels_csv)
         else:
             raise ValueError(f"Unknown classification method: {method}")
 
@@ -222,6 +254,152 @@ class HyperspectralClassifier:
         return class_map
 
     # ============================================================
+    # Method 3b – Spectral Angle Mapper (SAM)
+    # ============================================================
+
+    def _classify_sam(
+        self,
+        data: np.ndarray,
+        wavelengths: Optional[List[float]],
+        labels_csv: Optional[str],
+    ) -> np.ndarray:
+        """
+        Spectral Angle Mapper (SAM) classification.
+
+        Measures the angle between each pixel spectrum and a set of
+        reference (endmember) spectra in n-dimensional feature space.
+        Because only the *direction* matters, SAM is invariant to
+        per-pixel brightness differences (illumination / shadow effects).
+
+        Modes
+        -----
+        Supervised  : --labels CSV (row,col,class_id)
+                      Mean spectrum of each class label = endmember.
+        Unsupervised: No labels needed.
+                      K-means cluster centres = endmembers.
+
+        Assignment
+        ----------
+        Each pixel is assigned to the class whose endmember forms the
+        smallest spectral angle.  Pixels with angle > angle_threshold
+        are marked as background (class 0 = unclassified).
+        """
+        cfg       = self.cfg.get("sam", {})
+        H, W, B   = data.shape
+        threshold = float(cfg.get("angle_threshold", 0.10))   # radians
+
+        # ---- 1. Obtain reference endmembers ----
+        if labels_csv is not None:
+            import pandas as pd
+            df        = pd.read_csv(labels_csv, names=["row", "col", "class_id"])
+            class_ids = sorted(df["class_id"].unique().tolist())
+            endmembers = []
+            for cid in class_ids:
+                sub  = df[df["class_id"] == cid]
+                rows = sub["row"].astype(int).values
+                cols = sub["col"].astype(int).values
+                px   = data[rows, cols, :]          # (N_label, B)
+                endmembers.append(px.mean(axis=0))  # mean spectrum
+            endmembers = np.stack(endmembers)       # (n_classes, B)
+            logger.info(
+                f"  SAM supervised: {len(class_ids)} endmembers "
+                f"(class IDs: {class_ids})"
+            )
+        else:
+            from sklearn.cluster import KMeans
+            from sklearn.decomposition import PCA
+
+            n_em  = int(cfg.get("n_endmembers", 6))
+            n_pca = int(cfg.get("endmember_pca", 15))
+            flat  = data.reshape(-1, B).astype(np.float32)
+
+            # Optional PCA before K-means
+            if n_pca > 0:
+                n_pca = min(n_pca, B, flat.shape[0] - 1)
+                pca   = PCA(n_components=n_pca, random_state=42)
+                flat_r = pca.fit_transform(flat)
+            else:
+                flat_r = flat
+
+            km   = KMeans(n_clusters=n_em, n_init=5, random_state=42)
+            km.fit(flat_r)
+
+            # Recover endmembers in original spectral space:
+            # use the mean spectrum of each K-means cluster
+            labels_km = km.labels_
+            endmembers = np.stack([
+                data.reshape(-1, B)[labels_km == k].mean(axis=0)
+                for k in range(n_em)
+            ])
+            class_ids = list(range(1, n_em + 1))
+            logger.info(
+                f"  SAM unsupervised: {n_em} K-means endmembers "
+                f"(pca_components={n_pca})"
+            )
+
+        # ---- 2. Compute spectral angles ----
+        flat = data.reshape(-1, B).astype(np.float64)   # (N, B)
+        em   = endmembers.astype(np.float64)             # (C, B)
+
+        # L2-normalise both sets of vectors
+        flat_n = flat / (np.linalg.norm(flat, axis=1, keepdims=True) + 1e-9)
+        em_n   = em   / (np.linalg.norm(em,   axis=1, keepdims=True) + 1e-9)
+
+        # Dot-product → cosine → angle   shape: (N, C)
+        cos_sim = flat_n @ em_n.T
+        cos_sim = np.clip(cos_sim, -1.0, 1.0)
+        angles  = np.arccos(cos_sim)
+
+        # ---- 3. Assign class ----
+        best_idx   = np.argmin(angles, axis=1)                         # (N,)
+        best_angle = angles[np.arange(len(angles)), best_idx]          # (N,)
+
+        class_ids_arr = np.array(class_ids, dtype=np.int32)
+        pred          = class_ids_arr[best_idx]
+
+        # Reject pixels beyond threshold
+        if threshold > 0:
+            rejected = best_angle > threshold
+            pred[rejected] = 0
+            logger.info(
+                f"  SAM angle_threshold={threshold:.3f} rad "
+                f"({np.degrees(threshold):.1f} deg) -> "
+                f"{rejected.sum():,} px unclassified "
+                f"({100 * rejected.mean():.1f}%)"
+            )
+
+        class_map = pred.reshape(H, W)
+        return class_map
+
+    # ============================================================
+    # Method 4 – Autoencoder + K-means (unsupervised deep)
+    # ============================================================
+
+    def _classify_autoencoder(self, data: np.ndarray) -> np.ndarray:
+        from .deep_classifier import DeepClassifier
+        cfg       = self.cfg.get("autoencoder", {})
+        n_clusters = int(cfg.get("n_clusters", 8))
+        dc        = DeepClassifier({"classification": self.cfg})
+        return dc.classify_autoencoder(data, n_clusters).astype(np.int32)
+
+    # ============================================================
+    # Method 5 – 1D-CNN (supervised deep)
+    # ============================================================
+
+    def _classify_cnn(
+        self,
+        data: np.ndarray,
+        labels_csv: Optional[str],
+    ) -> np.ndarray:
+        from .deep_classifier import DeepClassifier
+        dc = DeepClassifier({"classification": self.cfg})
+        return dc.classify_cnn(
+            data,
+            n_classes=self.cfg.get("cnn", {}).get("n_classes", 4),
+            labels_csv=labels_csv,
+        ).astype(np.int32)
+
+    # ============================================================
     # K-means refinement helper
     # ============================================================
 
@@ -275,7 +453,7 @@ class HyperspectralClassifier:
             refined[mask] = new_ids
             logger.info(
                 f"  Segment {seg_id}: refined into {k} sub-clusters "
-                f"(ids {next_id}–{next_id+k-1})"
+                f"(ids {next_id}-{next_id+k-1})"
             )
             next_id += k
 
@@ -380,13 +558,17 @@ class HyperspectralClassifier:
         id_lookup = {c["id"]: c for c in self.classes}
 
         info = []
-        for cid in unique_ids:
+        for rank, cid in enumerate(unique_ids):
             n_px = int((class_map == cid).sum())
             cfg_entry = id_lookup.get(cid, {})
+            # Auto-assign a distinct palette colour when none is configured.
+            # Use cid-based index first (preserves hybrid method semantics),
+            # then fall back to rank order so colours never collide.
+            default_color = _CLASS_PALETTE[cid % len(_CLASS_PALETTE)]
             info.append({
                 "id":       cid,
                 "name":     cfg_entry.get("name", f"Cluster {cid}"),
-                "color":    cfg_entry.get("color", [128, 128, 128]),
+                "color":    cfg_entry.get("color", default_color),
                 "n_pixels": n_px,
                 "fraction": n_px / total,
             })
