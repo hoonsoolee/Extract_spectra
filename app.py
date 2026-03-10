@@ -212,6 +212,45 @@ def _build_label_figure(
     return fig
 
 
+_LBL_SUPPORTED_EXTS = {".hdr", ".tif", ".tiff", ".h5", ".hdf5", ".mat"}
+
+
+def _do_load_file(path_str: str) -> tuple:
+    """
+    Load a single hyperspectral file into session state.
+    Returns (H, W, B) on success; raises on failure.
+    """
+    from src.data_loader import HyperspectralLoader
+    from src.preprocessor import Preprocessor
+
+    _min_cfg = {
+        "data": {},
+        "preprocessing": {
+            "normalize":          True,
+            "remove_bad_bands":   True,
+            "bad_band_ranges":    [[1340, 1460], [1790, 1960]],
+            "smooth_spectra":     False,
+            "spatial_downsample": 1,
+        },
+    }
+    _loader = HyperspectralLoader(_min_cfg["data"])
+    _prep   = Preprocessor(_min_cfg)
+
+    _raw, _meta = _loader.load_local(path_str)
+    _data, _wl  = _prep.process(_raw, _meta.get("wavelengths"))
+    _rgb        = _get_display_rgb(_data, _wl)
+
+    st.session_state["lbl_data"]      = _data
+    st.session_state["lbl_wl"]        = _wl
+    st.session_state["lbl_rgb"]       = _rgb
+    st.session_state["lbl_file"]      = path_str
+    st.session_state["lbl_rows"]      = []
+    st.session_state["lbl_prev_sel"]  = None
+    st.session_state["lbl_file_list"] = []
+
+    return _data.shape
+
+
 # ============================================================
 # Sidebar – Settings (pipeline run tab)
 # ============================================================
@@ -562,6 +601,8 @@ with tab_label:
         "lbl_prev_sel":      None,   # (row, col) last processed click
         "lbl_n_classes":     5,      # number of classes
         "lbl_active_cls":    0,      # currently selected class id
+        "lbl_file_list":     [],     # files found when a directory is entered
+        "lbl_dir_input":     "",     # last directory path entered
     }
     for k, v in _lbl_defaults.items():
         if k not in st.session_state:
@@ -569,59 +610,85 @@ with tab_label:
 
     # ── Step 1: Load file ─────────────────────────────────────
     st.markdown("#### 1️⃣ 파일 로드")
+
     lcol1, lcol2 = st.columns([5, 1])
     with lcol1:
         lbl_file_input = st.text_input(
-            "파일 경로",
-            value=st.session_state["lbl_file"],
-            placeholder="./data/image.hdr  (ENVI / TIFF / HDF5 / MAT)",
+            "파일 또는 폴더 경로",
+            value=st.session_state["lbl_file"] or st.session_state["lbl_dir_input"],
+            placeholder="./data/image.hdr  또는  ./data  (폴더 입력 → 파일 목록 표시)",
             label_visibility="collapsed",
         )
     with lcol2:
         load_btn = st.button("📂 로드", use_container_width=True)
 
     if load_btn and lbl_file_input:
-        with st.spinner("파일 로딩 중..."):
-            try:
-                from src.data_loader import HyperspectralLoader
-                from src.preprocessor import Preprocessor
-
-                _min_cfg = {
-                    "data": {},
-                    "preprocessing": {
-                        "normalize":          True,
-                        "remove_bad_bands":   True,
-                        "bad_band_ranges":    [[1340, 1460], [1790, 1960]],
-                        "smooth_spectra":     False,
-                        "spatial_downsample": 1,
-                    },
-                }
-                _loader = HyperspectralLoader(_min_cfg["data"])
-                _prep   = Preprocessor(_min_cfg)
-
-                _raw, _meta = _loader.load_local(lbl_file_input)
-                _data, _wl  = _prep.process(_raw, _meta.get("wavelengths"))
-                _rgb        = _get_display_rgb(_data, _wl)
-
-                st.session_state["lbl_data"]     = _data
-                st.session_state["lbl_wl"]       = _wl
-                st.session_state["lbl_rgb"]      = _rgb
-                st.session_state["lbl_file"]     = lbl_file_input
-                st.session_state["lbl_rows"]     = []
-                st.session_state["lbl_prev_sel"] = None
-
-                _H, _W, _B = _data.shape
-                st.success(
-                    f"✅ 로드 완료  |  {_H} × {_W} px  |  {_B} 밴드  "
-                    f"|  {Path(lbl_file_input).name}"
+        _inp_path = Path(lbl_file_input)
+        if _inp_path.is_dir():
+            # ── Directory: scan for supported files ──────────
+            _found = sorted([
+                f for f in _inp_path.iterdir()
+                if f.suffix.lower() in _LBL_SUPPORTED_EXTS
+            ])
+            if not _found:
+                st.error(
+                    f"❌ `{lbl_file_input}` 폴더에 지원 형식 파일이 없습니다.  \n"
+                    f"지원 형식: {', '.join(sorted(_LBL_SUPPORTED_EXTS))}"
                 )
-            except Exception:
-                st.error("❌ 파일 로드 실패")
-                st.code(traceback.format_exc(), language="python")
+                st.session_state["lbl_file_list"] = []
+            else:
+                st.session_state["lbl_file_list"] = [str(f) for f in _found]
+                st.session_state["lbl_dir_input"] = lbl_file_input
+        else:
+            # ── Single file: load directly ───────────────────
+            with st.spinner("파일 로딩 중..."):
+                try:
+                    _H, _W, _B = _do_load_file(lbl_file_input)
+                    st.success(
+                        f"✅ 로드 완료  |  {_H} × {_W} px  |  {_B} 밴드  "
+                        f"|  {Path(lbl_file_input).name}"
+                    )
+                except Exception:
+                    st.error("❌ 파일 로드 실패")
+                    st.code(traceback.format_exc(), language="python")
+
+    # ── File selector (shown after directory scan) ────────────
+    if st.session_state["lbl_file_list"]:
+        _file_list = st.session_state["lbl_file_list"]
+        st.info(
+            f"📁 **{len(_file_list)}개** 파일을 찾았습니다. "
+            f"파일을 선택한 후 [✅ 로드] 버튼을 클릭하세요."
+        )
+        _fsel_c1, _fsel_c2 = st.columns([5, 1])
+        with _fsel_c1:
+            _sel_file = st.selectbox(
+                "파일 선택",
+                _file_list,
+                format_func=lambda p: Path(p).name,
+                label_visibility="collapsed",
+                key="lbl_selectbox_file",
+            )
+        with _fsel_c2:
+            if st.button(
+                "✅ 로드", type="primary",
+                use_container_width=True, key="lbl_load_sel_btn"
+            ):
+                with st.spinner("파일 로딩 중..."):
+                    try:
+                        _H, _W, _B = _do_load_file(_sel_file)
+                        st.success(
+                            f"✅ 로드 완료  |  {_H} × {_W} px  |  {_B} 밴드  "
+                            f"|  {Path(_sel_file).name}"
+                        )
+                        st.rerun()
+                    except Exception:
+                        st.error("❌ 파일 로드 실패")
+                        st.code(traceback.format_exc(), language="python")
 
     # ── Guard: nothing loaded yet ─────────────────────────────
     if st.session_state["lbl_data"] is None:
-        st.info("⬆️ 초분광 파일 경로를 입력하고 [📂 로드] 버튼을 클릭하세요.")
+        if not st.session_state["lbl_file_list"]:
+            st.info("⬆️ 초분광 파일 경로 또는 폴더를 입력하고 [📂 로드] 버튼을 클릭하세요.")
 
     else:
         # ── Step 2: Class configuration ───────────────────────
