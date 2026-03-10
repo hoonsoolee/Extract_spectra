@@ -16,6 +16,7 @@ from .preprocessor import Preprocessor
 from .classifier import HyperspectralClassifier
 from .spectrum_extractor import SpectrumExtractor
 from .reporter import Reporter
+from .evaluator import Evaluator
 
 logger = logging.getLogger(__name__)
 
@@ -101,10 +102,11 @@ class Pipeline:
             f"{len(all_tasks)} total  ({elapsed:.1f}s)"
         )
 
-        # Generate consolidated HTML report
+        # Generate consolidated HTML report (timestamped – never overwrites)
         out_cfg = self.config.get("output", {})
         if out_cfg.get("save_report", True) and self.reporter.results:
-            report_path = self.output_dir / "report.html"
+            ts = time.strftime("%Y%m%d_%H%M%S")
+            report_path = self.output_dir / f"report_{ts}.html"
             self.reporter.render(report_path)
 
     # ============================================================
@@ -144,10 +146,25 @@ class Pipeline:
         class_map, class_info = self.clf.classify(data, wavelengths, labels_csv)
         logger.info(f"  Classify: {time.time()-t0:.2f}s")
 
+        # ---- 3b. Unsupervised quality metrics ----
+        t0 = time.time()
+        metrics = Evaluator.unsupervised_metrics(data, class_map)
+        sil = metrics.get("silhouette")
+        sil_str = f"{sil:.3f}" if sil is not None else "N/A"
+        logger.info(
+            f"  Silhouette: {sil_str}  "
+            f"DB: {metrics.get('davies_bouldin') or 'N/A'}  "
+            f"-> {metrics.get('interpretation', '')}"
+        )
+        logger.info(f"  Evaluate: {time.time()-t0:.2f}s")
+
         # ---- 4. Extract spectra ----
         t0 = time.time()
         spectra = self.extr.extract(data, class_map, class_info, wavelengths)
         logger.info(f"  Extract spectra: {time.time()-t0:.2f}s")
+
+        # ---- 4b. Spectral separability ----
+        sep = Evaluator.spectral_separability(spectra)
 
         # ---- 5. Save outputs ----
         out_cfg = self.config.get("output", {})
@@ -169,6 +186,8 @@ class Pipeline:
             spectra=spectra,
             wavelengths=wavelengths,
             metadata=meta,
+            metrics=metrics,
+            separability=sep,
         )
 
         logger.info(f"  Outputs saved to: {file_out_dir}")

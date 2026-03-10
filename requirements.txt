@@ -1,3 +1,4 @@
+streamlit>=1.35.0
 numpy>=1.21.0
 scipy>=1.7.0
 scikit-learn>=1.0.0
@@ -12,3 +13,8 @@ PyYAML>=6.0
 pandas>=1.4.0
 tqdm>=4.62.0
 Pillow>=9.0.0
+
+# Deep learning (autoencoder / 1D-CNN methods)
+# CPU-only (~250 MB):  pip install torch --index-url https://download.pytorch.org/whl/cpu
+# CUDA GPU:            pip install torch --index-url https://download.pytorch.org/whl/cu121
+torch>=2.0.0
