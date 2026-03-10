@@ -146,7 +146,7 @@ class Pipeline:
         class_map, class_info = self.clf.classify(data, wavelengths, labels_csv)
         logger.info(f"  Classify: {time.time()-t0:.2f}s")
 
-        # ---- 3b. Unsupervised quality metrics ----
+        # ---- 3b. Quality metrics ----
         t0 = time.time()
         metrics = Evaluator.unsupervised_metrics(data, class_map)
         sil = metrics.get("silhouette")
@@ -156,6 +156,15 @@ class Pipeline:
             f"DB: {metrics.get('davies_bouldin') or 'N/A'}  "
             f"-> {metrics.get('interpretation', '')}"
         )
+        # Merge supervised validation accuracy if available
+        if self.clf.last_val_metrics:
+            metrics.update(self.clf.last_val_metrics)
+            acc = self.clf.last_val_metrics.get("accuracy")
+            if acc is not None:
+                logger.info(
+                    f"  Supervised val accuracy: {acc:.3f}  "
+                    f"F1: {self.clf.last_val_metrics.get('macro_f1', 'N/A')}"
+                )
         logger.info(f"  Evaluate: {time.time()-t0:.2f}s")
 
         # ---- 4. Extract spectra ----

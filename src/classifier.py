@@ -64,6 +64,8 @@ class HyperspectralClassifier:
     def __init__(self, config: dict):
         self.cfg = config.get("classification", {})
         self.classes = self.cfg.get("classes", [])
+        # Populated by supervised/cnn methods; read by Pipeline after classify()
+        self.last_val_metrics: dict = {}
 
     # ============================================================
     # Public entry point
@@ -237,10 +239,50 @@ class HyperspectralClassifier:
         pca = PCA(n_components=n_pca, random_state=42)
         X_train_pca = pca.fit_transform(X_train)
 
+        n_cls_lbl = len(np.unique(y))
         logger.info(
             f"  Supervised RF: {len(df)} labelled pixels, "
-            f"{len(np.unique(y))} classes"
+            f"{n_cls_lbl} classes"
         )
+
+        # ── Validation split: 20 % held-out for accuracy estimation ──
+        from sklearn.model_selection import train_test_split
+        from sklearn.metrics import accuracy_score, f1_score
+
+        val_acc = val_f1 = None
+        n_val = 0
+        if len(df) >= 10 and n_cls_lbl >= 2:
+            try:
+                stratify = y if np.min(np.bincount(y)) >= 2 else None
+                X_tr, X_val, y_tr, y_val = train_test_split(
+                    X_train_pca, y, test_size=0.2,
+                    random_state=42, stratify=stratify,
+                )
+                rf_val = RandomForestClassifier(
+                    n_estimators=100, random_state=42, n_jobs=-1
+                )
+                rf_val.fit(X_tr, y_tr)
+                y_val_pred = rf_val.predict(X_val)
+                val_acc = float(accuracy_score(y_val, y_val_pred))
+                val_f1  = float(f1_score(y_val, y_val_pred,
+                                         average="macro", zero_division=0))
+                n_val   = len(y_val)
+                logger.info(
+                    f"  RF validation  accuracy={val_acc:.3f}  "
+                    f"macro-F1={val_f1:.3f}  (n_val={n_val})"
+                )
+            except Exception as e:
+                logger.warning(f"  Validation split failed: {e}")
+
+        self.last_val_metrics = {
+            "method":    "supervised",
+            "accuracy":  val_acc,
+            "macro_f1":  val_f1,
+            "n_train":   len(df) - n_val,
+            "n_val":     n_val,
+        }
+
+        # ── Final model trained on ALL labelled pixels ────────────
         rf = RandomForestClassifier(n_estimators=200, random_state=42, n_jobs=-1)
         rf.fit(X_train_pca, y)
 

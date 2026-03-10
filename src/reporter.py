@@ -4,10 +4,10 @@ reporter.py
 Generates a self-contained HTML report for one or multiple processed images.
 Includes:
   - RGB composite & False Color Infrared (CIR) images
-  - Classification map
+  - Classification map (all classes combined)
+  - Per-class individual overlay images (new)
   - Interactive spectral plots (Plotly)
   - Per-class statistics table
-  - Processing log summary
 """
 
 import base64
@@ -21,7 +21,6 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +39,7 @@ _HTML_HEAD = """<!DOCTYPE html>
 <style>
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
   body {{ font-family: 'Segoe UI', Arial, sans-serif; background: #f0f2f5; color: #222; }}
-  .container {{ max-width: 1400px; margin: 0 auto; padding: 24px; }}
+  .container {{ max-width: 1500px; margin: 0 auto; padding: 24px; }}
   .header {{ background: linear-gradient(135deg, #1a3a5c, #2e7d62); color: #fff;
              padding: 28px 32px; border-radius: 12px; margin-bottom: 24px; }}
   .header h1 {{ font-size: 26px; font-weight: 700; }}
@@ -49,12 +48,30 @@ _HTML_HEAD = """<!DOCTYPE html>
            box-shadow: 0 2px 8px rgba(0,0,0,.08); }}
   .card h2 {{ font-size: 18px; color: #1a3a5c; border-bottom: 2px solid #2e7d62;
               padding-bottom: 8px; margin-bottom: 16px; }}
-  .card h3 {{ font-size: 15px; color: #444; margin: 20px 0 10px; }}
-  .img-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  /* Overview images: max 3 columns */
+  .img-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
                gap: 16px; }}
+  /* Per-class images: 2–4 columns depending on viewport */
+  .class-img-grid {{ display: grid;
+                     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+                     gap: 14px; }}
   .img-card {{ text-align: center; }}
   .img-card img {{ width: 100%; border-radius: 6px; border: 1px solid #ddd; }}
-  .img-card p {{ margin-top: 6px; font-size: 12px; color: #666; }}
+  .img-card .img-title {{
+    margin-top: 6px; font-size: 13px; font-weight: 600; color: #333; }}
+  .img-card .img-sub {{
+    font-size: 11px; color: #777; margin-top: 2px; }}
+  .class-card {{
+    background: #fafafa; border: 1px solid #e0e0e0; border-radius: 8px;
+    padding: 10px; text-align: center; transition: box-shadow .2s; }}
+  .class-card:hover {{ box-shadow: 0 4px 12px rgba(0,0,0,.12); }}
+  .class-card img {{ width: 100%; border-radius: 4px; }}
+  .class-card .cls-name {{
+    margin-top: 8px; font-size: 13px; font-weight: 700; }}
+  .class-card .cls-stats {{
+    font-size: 11px; color: #666; margin-top: 3px; }}
+  .color-dot {{ display: inline-block; width: 10px; height: 10px;
+                border-radius: 50%; margin-right: 4px; vertical-align: middle; }}
   table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
   th {{ background: #1a3a5c; color: #fff; padding: 10px 12px; text-align: left; }}
   td {{ padding: 9px 12px; border-bottom: 1px solid #eee; }}
@@ -67,9 +84,8 @@ _HTML_HEAD = """<!DOCTYPE html>
                padding: 14px; text-align: center; }}
   .stat-val {{ font-size: 22px; font-weight: 700; color: #1a3a5c; }}
   .stat-lbl {{ font-size: 11px; color: #888; margin-top: 4px; }}
-  .file-block {{ border-left: 4px solid #2e7d62; padding-left: 16px; margin-bottom: 32px; }}
-  .file-block h2 {{ color: #2e7d62; font-size: 17px; margin-bottom: 12px; }}
-  .section-divider {{ border: none; border-top: 1px solid #e0e0e0; margin: 24px 0; }}
+  .file-block {{ border-left: 4px solid #2e7d62; padding-left: 16px; margin-bottom: 40px; }}
+  .file-block > h2 {{ color: #2e7d62; font-size: 17px; margin-bottom: 12px; }}
   .toc {{ background: #f7faf9; border: 1px solid #dde; border-radius: 8px;
           padding: 14px 20px; margin-bottom: 24px; }}
   .toc h3 {{ margin-bottom: 8px; color: #444; font-size: 14px; }}
@@ -100,7 +116,7 @@ class Reporter:
     """Accumulate per-file results and render a final HTML report."""
 
     def __init__(self, config: dict):
-        self.cfg = config
+        self.cfg  = config
         self.rcfg = config.get("report", {})
         self.results: List[Dict[str, Any]] = []
 
@@ -117,25 +133,22 @@ class Reporter:
         spectra: List[Dict[str, Any]],
         wavelengths: Optional[List[float]],
         metadata: Dict[str, Any],
+        metrics: Optional[Dict[str, Any]] = None,
+        separability: Optional[Dict[str, Any]] = None,
     ) -> None:
-        self.results.append(
-            dict(
-                filename=filename,
-                data=data,
-                class_map=class_map,
-                class_info=class_info,
-                spectra=spectra,
-                wavelengths=wavelengths,
-                metadata=metadata,
-            )
-        )
+        self.results.append(dict(
+            filename=filename, data=data, class_map=class_map,
+            class_info=class_info, spectra=spectra,
+            wavelengths=wavelengths, metadata=metadata,
+            metrics=metrics, separability=separability,
+        ))
 
     def render(self, output_path: str | Path) -> None:
         """Write the complete HTML report to *output_path*."""
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        title = self.rcfg.get("title", "Hyperspectral Analysis Report")
+        title     = self.rcfg.get("title", "Hyperspectral Analysis Report")
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         html_parts = [
@@ -158,10 +171,9 @@ class Reporter:
             html_parts.append(self._render_file_block(i, result))
 
         html_parts.append(_HTML_FOOT.format(timestamp=timestamp))
-        html = "\n".join(html_parts)
 
         with open(output_path, "w", encoding="utf-8") as f:
-            f.write(html)
+            f.write("\n".join(html_parts))
         logger.info(f"Report saved: {output_path}")
 
     # ---------------------------------------------------------- #
@@ -169,48 +181,69 @@ class Reporter:
     # ---------------------------------------------------------- #
 
     def _render_file_block(self, idx: int, result: Dict[str, Any]) -> str:
-        fname    = result["filename"]
-        data     = result["data"]
-        class_map = result["class_map"]
+        fname      = result["filename"]
+        data       = result["data"]
+        class_map  = result["class_map"]
         class_info = result["class_info"]
-        spectra  = result["spectra"]
-        wl       = result["wavelengths"]
-        meta     = result["metadata"]
+        spectra    = result["spectra"]
+        wl         = result["wavelengths"]
+        meta       = result["metadata"]
 
         H, W, B = data.shape
-        n_px     = H * W
+        n_px    = H * W
+
+        # Pre-compute RGB array once (reused for per-class overlays)
+        rgb_arr = self._get_rgb_array(data, wl, mode="rgb")
 
         parts = [
             f'<div class="file-block" id="file-{idx}">',
             f'<h2>📁 {fname}</h2>',
 
-            # Quick stats
+            # ── 요약 통계 ──────────────────────────────────────────
             '<div class="stat-row">',
-            self._stat_box("해상도", f"{W} × {H}"),
+            self._stat_box("해상도",  f"{W} × {H}"),
             self._stat_box("밴드 수", str(B)),
             self._stat_box("총 픽셀", f"{n_px:,}"),
-            self._stat_box("형식", meta.get("format", "—")),
+            self._stat_box("클래스 수", str(len(class_info))),
+            self._stat_box("형식",    meta.get("format", "—")),
             '</div>',
 
-            # Image composites + classification map
+            # ── 개요 이미지 (RGB / CIR / 통합 분류 맵) ───────────
             '<div class="card">',
-            '<h2>이미지 시각화</h2>',
+            '<h2>📷 이미지 개요</h2>',
             '<div class="img-grid">',
-            self._img_card("RGB 합성", self._make_rgb(data, wl, "rgb")),
-            self._img_card("CIR 위색도 (NIR-R-G)", self._make_rgb(data, wl, "cir")),
-            self._img_card("분류 결과", self._make_class_map_img(class_map, class_info)),
+            self._img_card("RGB 합성",
+                           self._array_to_b64(rgb_arr)),
+            self._img_card("CIR 위색도 (NIR-R-G)",
+                           self._array_to_b64(self._get_rgb_array(data, wl, "cir"))),
+            self._img_card("통합 분류 맵",
+                           self._make_class_map_img(class_map, class_info)),
             '</div></div>',
 
-            # Classification summary table
+            # ── 클래스별 개별 이미지 ───────────────────────────────
             '<div class="card">',
-            '<h2>분류 요약</h2>',
+            '<h2>🗂️ 클래스별 분류 이미지</h2>',
+            '<p style="font-size:12px;color:#888;margin-bottom:14px;">'
+            '각 클래스 픽셀을 해당 색상으로 강조, 나머지는 그레이스케일로 표시</p>',
+            self._render_per_class_images(data, class_map, class_info, rgb_arr, n_px),
+            '</div>',
+
+            # ── 분류 요약 테이블 ───────────────────────────────────
+            '<div class="card">',
+            '<h2>📊 분류 요약</h2>',
             self._class_table(class_info, n_px),
             '</div>',
 
-            # Spectral plots
+            # ── 스펙트럼 차트 ──────────────────────────────────────
             '<div class="card">',
-            '<h2>클래스별 반사율 스펙트럼</h2>',
+            '<h2>📈 클래스별 반사율 스펙트럼</h2>',
             self._spectra_plot_html(spectra, wl),
+            '</div>',
+
+            # Quality assessment card
+            '<div class="card">',
+            '<h2>&#128202; 품질 평가 (Quality Assessment)</h2>',
+            self._render_quality_section(result.get("metrics"), result.get("separability")),
             '</div>',
 
             '</div>',  # file-block
@@ -218,18 +251,72 @@ class Reporter:
         return "\n".join(parts)
 
     # ---------------------------------------------------------- #
-    # Image helpers
+    # Per-class overlay images
     # ---------------------------------------------------------- #
 
-    def _make_rgb(
+    def _render_per_class_images(
+        self,
+        data: np.ndarray,
+        class_map: np.ndarray,
+        class_info: List[Dict[str, Any]],
+        rgb_arr: np.ndarray,
+        total_px: int,
+    ) -> str:
+        """Build a grid of per-class highlight images."""
+        cards = []
+        # Sort by pixel count descending for visual clarity
+        for cinfo in sorted(class_info, key=lambda x: -x["n_pixels"]):
+            b64   = self._make_single_class_img(class_map, cinfo, rgb_arr)
+            r, g, b_ = cinfo["color"]
+            pct   = 100.0 * cinfo["n_pixels"] / total_px
+            dot   = f'<span class="color-dot" style="background:rgb({r},{g},{b_})"></span>'
+            cards.append(
+                f'<div class="class-card">'
+                f'<img src="data:image/png;base64,{b64}" alt="{cinfo["name"]}">'
+                f'<div class="cls-name">{dot}{cinfo["name"]}</div>'
+                f'<div class="cls-stats">'
+                f'ID {cinfo["id"]} &nbsp;|&nbsp; '
+                f'{cinfo["n_pixels"]:,} px &nbsp;|&nbsp; {pct:.1f}%'
+                f'</div></div>'
+            )
+        return f'<div class="class-img-grid">{"".join(cards)}</div>'
+
+    def _make_single_class_img(
+        self,
+        class_map: np.ndarray,
+        cinfo: Dict[str, Any],
+        rgb_arr: np.ndarray,
+    ) -> str:
+        """
+        Highlight one class in its class color on a darkened grayscale background.
+        """
+        # Grayscale background (darkened to 30%)
+        gray = np.mean(rgb_arr, axis=2, keepdims=True)  # (H, W, 1)
+        bg   = np.repeat(gray * 0.30, 3, axis=2)        # (H, W, 3) dark gray
+
+        # Overlay class pixels in class color
+        result = bg.copy()
+        mask   = class_map == cinfo["id"]
+        r, g, b_ = [c / 255.0 for c in cinfo["color"]]
+        result[mask, 0] = r
+        result[mask, 1] = g
+        result[mask, 2] = b_
+
+        return self._array_to_b64(np.clip(result, 0, 1))
+
+    # ---------------------------------------------------------- #
+    # RGB / class-map image helpers
+    # ---------------------------------------------------------- #
+
+    def _get_rgb_array(
         self,
         data: np.ndarray,
         wavelengths: Optional[List[float]],
         mode: str = "rgb",
-    ) -> str:
-        """Render RGB or CIR composite, return base64 PNG string."""
+    ) -> np.ndarray:
+        """Return a normalised (H, W, 3) float32 array for RGB or CIR composite."""
         rcfg = self.rcfg
-        H, W, B = data.shape
+        B    = data.shape[2]
 
         if mode == "rgb":
             targets = [
@@ -237,51 +324,49 @@ class Reporter:
                 rcfg.get("rgb_green_nm", 550),
                 rcfg.get("rgb_blue_nm",  450),
             ]
-        else:  # CIR: NIR / Red / Green
+        else:   # CIR: NIR / Red / Green
             targets = [800, 660, 550]
 
         channels = []
         for t in targets:
             if wavelengths:
-                wl = np.array(wavelengths)
+                wl  = np.array(wavelengths)
                 idx = int(np.argmin(np.abs(wl - t)))
             else:
-                frac = (t - 400) / 600.0   # rough guess 400–1000nm
-                idx = int(np.clip(frac * (B - 1), 0, B - 1))
+                frac = (t - 400) / 600.0
+                idx  = int(np.clip(frac * (B - 1), 0, B - 1))
             channels.append(data[:, :, idx])
 
-        rgb = np.stack(channels, axis=2)
+        rgb = np.stack(channels, axis=2).astype(np.float32)
         lo, hi = rcfg.get("rgb_percentile_stretch", [2, 98])
         for c in range(3):
             p_lo = np.percentile(rgb[:, :, c], lo)
             p_hi = np.percentile(rgb[:, :, c], hi)
             if p_hi > p_lo:
                 rgb[:, :, c] = (rgb[:, :, c] - p_lo) / (p_hi - p_lo)
-        rgb = np.clip(rgb, 0, 1)
-
-        return self._array_to_b64(rgb)
+        return np.clip(rgb, 0, 1)
 
     def _make_class_map_img(
         self,
         class_map: np.ndarray,
         class_info: List[Dict[str, Any]],
     ) -> str:
+        """Full classification map with all classes coloured."""
         H, W = class_map.shape
-        rgb = np.zeros((H, W, 3), dtype=np.uint8)
+        rgb  = np.zeros((H, W, 3), dtype=np.uint8)
         for cinfo in class_info:
-            mask = class_map == cinfo["id"]
-            rgb[mask] = cinfo["color"]
+            rgb[class_map == cinfo["id"]] = cinfo["color"]
         return self._array_to_b64(rgb.astype(np.float32) / 255.0)
 
     @staticmethod
     def _array_to_b64(arr: np.ndarray) -> str:
-        """Convert (H, W, 3) float [0,1] array to base64 PNG."""
-        fig, ax = plt.subplots(figsize=(5, 5), dpi=100)
+        """Convert (H, W, 3) float [0,1] to base64-encoded PNG."""
+        fig, ax = plt.subplots(figsize=(4, 4), dpi=90)
         ax.imshow(arr)
         ax.axis("off")
         fig.tight_layout(pad=0)
         buf = io.BytesIO()
-        fig.savefig(buf, format="png", bbox_inches="tight", pad_inches=0, dpi=100)
+        fig.savefig(buf, format="png", bbox_inches="tight", pad_inches=0, dpi=90)
         plt.close(fig)
         buf.seek(0)
         return base64.b64encode(buf.read()).decode("ascii")
@@ -291,11 +376,11 @@ class Reporter:
         return (
             f'<div class="img-card">'
             f'<img src="data:image/png;base64,{b64}" alt="{title}">'
-            f'<p>{title}</p></div>'
+            f'<p class="img-title">{title}</p></div>'
         )
 
     # ---------------------------------------------------------- #
-    # Table helper
+    # Classification summary table
     # ---------------------------------------------------------- #
 
     def _class_table(
@@ -311,21 +396,292 @@ class Reporter:
                 f'{c["name"]}</span>'
             )
             pct = 100.0 * c["n_pixels"] / total_px
+            bar_w = max(1, int(pct))
+            bar = (
+                f'<div style="background:rgb({r},{g},{b_});height:8px;'
+                f'width:{bar_w}%;border-radius:4px;display:inline-block;'
+                f'vertical-align:middle;margin-left:6px;"></div>'
+            )
             rows += (
                 f'<tr><td>{badge}</td>'
                 f'<td>{c["id"]}</td>'
                 f'<td>{c["n_pixels"]:,}</td>'
-                f'<td>{pct:.2f}%</td></tr>'
+                f'<td>{pct:.2f}% {bar}</td></tr>'
             )
         return (
             "<table>"
-            "<thead><tr><th>클래스</th><th>ID</th><th>픽셀 수</th><th>비율</th></tr></thead>"
+            "<thead><tr>"
+            "<th>클래스</th><th>ID</th><th>픽셀 수</th><th>비율</th>"
+            "</tr></thead>"
             f"<tbody>{rows}</tbody></table>"
         )
 
     # ---------------------------------------------------------- #
+    # Quality assessment section
+    # ---------------------------------------------------------- #
+
+    def _render_quality_section(
+        self,
+        metrics: Optional[Dict[str, Any]],
+        sep: Optional[Dict[str, Any]],
+    ) -> str:
+        """
+        Render quality assessment:
+          - Supervised  → Validation Accuracy gauge + Macro-F1 stat box
+          - Unsupervised→ Cluster Quality Score gauge (silhouette → 0-100 %)
+          Both include the spectral separability heatmap.
+        """
+        try:
+            import plotly.graph_objects as go
+            has_plotly = True
+        except ImportError:
+            has_plotly = False
+
+        parts = []
+
+        if metrics:
+            # ── Detect method ──────────────────────────────────────
+            is_supervised = (
+                metrics.get("method") in ("supervised", "cnn")
+                and metrics.get("accuracy") is not None
+            )
+
+            if is_supervised:
+                parts += self._render_supervised_quality(metrics, has_plotly)
+            else:
+                parts += self._render_unsupervised_quality(metrics, has_plotly)
+
+        # ── Spectral separability heatmap (always shown) ──────────
+        if sep and len(sep.get("names", [])) >= 2:
+            parts.append(
+                '<p style="font-size:12px;color:#666;margin:16px 0 8px 0;">'
+                '▶ 클래스 평균 스펙트럼 간 유클리드 거리 — 값이 클수록 클래스가 잘 구별됩니다.</p>'
+            )
+            parts.append(self._separability_heatmap_html(sep) if has_plotly
+                         else '<p><em>pip install plotly 후 표시됩니다.</em></p>')
+
+        if not parts:
+            parts.append('<p style="color:#999;">품질 지표를 계산할 수 없습니다.</p>')
+
+        return "\n".join(parts)
+
+    # ---- Supervised quality (Accuracy / F1) ----------------------
+
+    def _render_supervised_quality(
+        self,
+        metrics: Dict[str, Any],
+        has_plotly: bool,
+    ) -> list:
+        import plotly.graph_objects as go
+
+        acc    = metrics["accuracy"]          # 0.0–1.0
+        f1     = metrics.get("macro_f1")
+        n_tr   = metrics.get("n_train", "?")
+        n_val  = metrics.get("n_val",   "?")
+
+        acc_pct = acc * 100
+
+        if acc_pct >= 90:   gauge_color = "#27ae60"
+        elif acc_pct >= 75: gauge_color = "#2980b9"
+        elif acc_pct >= 60: gauge_color = "#f39c12"
+        else:               gauge_color = "#e74c3c"
+
+        parts = []
+
+        if has_plotly:
+            fig = go.Figure(go.Indicator(
+                mode="gauge+number",
+                value=round(acc_pct, 1),
+                number={"suffix": "%", "font": {"size": 44, "color": gauge_color}},
+                title={"text": (
+                    "검증 정확도 (Validation Accuracy)"
+                    "<br><span style='font-size:0.75em;color:#888;'>"
+                    f"학습: {n_tr}px  /  검증: {n_val}px</span>"
+                )},
+                gauge={
+                    "axis": {"range": [0, 100], "ticksuffix": "%"},
+                    "bar":  {"color": gauge_color, "thickness": 0.3},
+                    "bgcolor": "#f8f8f8",
+                    "borderwidth": 1,
+                    "bordercolor": "#ddd",
+                    "steps": [
+                        {"range": [0,  60], "color": "#ffebee"},
+                        {"range": [60, 75], "color": "#fff9c4"},
+                        {"range": [75, 90], "color": "#e8f5e9"},
+                        {"range": [90, 100],"color": "#c8e6c9"},
+                    ],
+                    "threshold": {
+                        "line": {"color": "#1a7a3a", "width": 3},
+                        "thickness": 0.75, "value": 90,
+                    },
+                },
+            ))
+            fig.update_layout(
+                height=280,
+                margin=dict(l=30, r=30, t=100, b=10),
+                paper_bgcolor="white",
+            )
+            parts.append(fig.to_html(full_html=False, include_plotlyjs=False))
+        else:
+            parts.append(
+                f'<div class="stat-box">'
+                f'<div class="stat-val" style="color:{gauge_color}">'
+                f'{acc_pct:.1f}%</div>'
+                f'<div class="stat-lbl">검증 정확도</div></div>'
+            )
+
+        # Secondary stat boxes
+        f1_text = f"{f1*100:.1f}%" if f1 is not None else "N/A"
+        parts += [
+            '<div class="stat-row" style="margin-top:12px;">',
+            (f'<div class="stat-box"><div class="stat-val">{f1_text}</div>'
+             f'<div class="stat-lbl">Macro F1-Score</div></div>'),
+            (f'<div class="stat-box"><div class="stat-val">{n_tr}</div>'
+             f'<div class="stat-lbl">학습 픽셀 수</div></div>'),
+            (f'<div class="stat-box"><div class="stat-val">{n_val}</div>'
+             f'<div class="stat-lbl">검증 픽셀 수</div></div>'),
+            '</div>',
+        ]
+        return parts
+
+    # ---- Unsupervised quality (Silhouette → 0-100 %) ─────────────
+
+    def _render_unsupervised_quality(
+        self,
+        metrics: Dict[str, Any],
+        has_plotly: bool,
+    ) -> list:
+        import plotly.graph_objects as go
+
+        sil    = metrics.get("silhouette")
+        db     = metrics.get("davies_bouldin")
+        interp = metrics.get("interpretation", "")
+        n_cls  = metrics.get("n_classes", "?")
+
+        # Convert silhouette (-1~1) → quality score (0~100 %)
+        # sil=1 → 100%, sil=0 → 50%, sil=-1 → 0%
+        quality = (float(sil) + 1) / 2 * 100 if sil is not None else None
+
+        if quality is None:
+            gauge_color = "#999999"
+        elif quality >= 85:   gauge_color = "#27ae60"
+        elif quality >= 62.5: gauge_color = "#2980b9"
+        elif quality >= 37.5: gauge_color = "#f39c12"
+        else:                 gauge_color = "#e74c3c"
+
+        parts = []
+
+        if has_plotly and quality is not None:
+            fig = go.Figure(go.Indicator(
+                mode="gauge+number",
+                value=round(quality, 1),
+                number={"suffix": "%", "font": {"size": 44, "color": gauge_color}},
+                title={"text": (
+                    "클러스터 품질 점수"
+                    "<br><span style='font-size:0.75em;color:#888;'>"
+                    "Silhouette 기반 (−1→0 % ~ +1→100 %)</span>"
+                )},
+                gauge={
+                    "axis": {"range": [0, 100], "ticksuffix": "%"},
+                    "bar":  {"color": gauge_color, "thickness": 0.3},
+                    "bgcolor": "#f8f8f8",
+                    "borderwidth": 1,
+                    "bordercolor": "#ddd",
+                    "steps": [
+                        {"range": [0,   37.5], "color": "#ffebee"},
+                        {"range": [37.5, 62.5],"color": "#fff9c4"},
+                        {"range": [62.5, 85],  "color": "#e8f5e9"},
+                        {"range": [85,  100],  "color": "#c8e6c9"},
+                    ],
+                    "threshold": {
+                        "line": {"color": "#1a7a3a", "width": 3},
+                        "thickness": 0.75, "value": 85,
+                    },
+                },
+            ))
+            fig.update_layout(
+                height=280,
+                margin=dict(l=30, r=30, t=100, b=10),
+                paper_bgcolor="white",
+            )
+            parts.append(fig.to_html(full_html=False, include_plotlyjs=False))
+        elif sil is not None:
+            parts.append(
+                f'<div class="stat-box">'
+                f'<div class="stat-val" style="color:{gauge_color}">'
+                f'{quality:.1f}%</div>'
+                f'<div class="stat-lbl">클러스터 품질 점수</div></div>'
+            )
+
+        # Secondary stat boxes
+        db_text = f"{db:.3f}" if db is not None else "N/A"
+        sil_text = f"{sil:.3f}" if sil is not None else "N/A"
+        parts += [
+            '<div class="stat-row" style="margin-top:12px;">',
+            (f'<div class="stat-box"><div class="stat-val">{sil_text}</div>'
+             f'<div class="stat-lbl">Silhouette Score (−1~1)</div></div>'),
+            (f'<div class="stat-box"><div class="stat-val">{db_text}</div>'
+             f'<div class="stat-lbl">Davies-Bouldin Index ↓</div></div>'),
+            (f'<div class="stat-box"><div class="stat-val">{n_cls}</div>'
+             f'<div class="stat-lbl">클래스 수</div></div>'),
+            '</div>',
+        ]
+        if interp:
+            parts.append(
+                f'<p style="margin:8px 0 0 0;">'
+                f'<span class="badge" style="background:{gauge_color};'
+                f'font-size:13px;padding:5px 14px;">{interp}</span></p>'
+            )
+        return parts
+
+    def _separability_heatmap_html(
+        self,
+        sep: Dict[str, Any],
+    ) -> str:
+        """Plotly heatmap of pairwise spectral distances between class means."""
+        try:
+            import plotly.graph_objects as go
+        except ImportError:
+            return "<p><em>pip install plotly 후 분리도 히트맵이 표시됩니다.</em></p>"
+
+        names  = sep["names"]
+        matrix = sep["matrix"]
+
+        z    = np.round(matrix, 4).tolist()
+        text = [[f"{v:.3f}" for v in row] for row in z]
+
+        fig = go.Figure(data=go.Heatmap(
+            z=z,
+            x=names,
+            y=names,
+            text=text,
+            texttemplate="%{text}",
+            textfont=dict(size=11),
+            colorscale="Viridis",
+            colorbar=dict(title="거리"),
+        ))
+        fig.update_layout(
+            title=dict(
+                text="스펙트럼 분리도 행렬 (클래스 평균 스펙트럼 간 유클리드 거리)",
+                font=dict(size=13),
+            ),
+            xaxis_title="클래스",
+            yaxis_title="클래스",
+            height=max(320, 60 * len(names) + 120),
+            margin=dict(l=120, r=20, t=60, b=80),
+            plot_bgcolor="#fafafa",
+            paper_bgcolor="#ffffff",
+        )
+        return fig.to_html(full_html=False, include_plotlyjs=False)
+
+    # ---------------------------------------------------------- #
     # Plotly spectral chart
     # ---------------------------------------------------------- #
+
+    # Dash patterns cycled across classes for visual distinction
+    _DASH_STYLES = [
+        "solid", "dash", "dot", "dashdot", "longdash", "longdashdot",
+    ]
 
     def _spectra_plot_html(
         self,
@@ -335,57 +691,58 @@ class Reporter:
         try:
             import plotly.graph_objects as go
         except ImportError:
-            return "<p><em>plotly를 설치하면 인터랙티브 차트가 표시됩니다: pip install plotly</em></p>"
+            return "<p><em>pip install plotly 후 차트가 표시됩니다.</em></p>"
 
-        show_std    = self.rcfg.get("spectra_show_std", True)
-        show_minmax = self.rcfg.get("spectra_show_minmax", False)
-
+        show_std = self.rcfg.get("spectra_show_std", True)
         fig = go.Figure()
-        for s in spectra:
+
+        for i, s in enumerate(spectra):
             name  = s["name"]
             r, g, b_ = s["color"]
             color_rgb = f"rgb({r},{g},{b_})"
+            dash  = self._DASH_STYLES[i % len(self._DASH_STYLES)]
+            wl    = s.get("wavelengths") or list(range(len(s["mean"])))
+            mean  = s["mean"].tolist()
+            std   = s["std"].tolist()
 
-            wl = s.get("wavelengths") or list(range(len(s["mean"])))
-            mean = s["mean"]
-            std  = s["std"]
-
-            # Mean line
+            # Mean line – class colour + unique dash pattern
             fig.add_trace(go.Scatter(
-                x=wl, y=mean.tolist(),
-                name=name,
-                mode="lines",
-                line=dict(color=color_rgb, width=2),
+                x=wl, y=mean, name=name, mode="lines",
+                line=dict(color=color_rgb, width=2.5, dash=dash),
             ))
 
-            # ±1 std envelope
+            # ±1 std shaded envelope
             if show_std:
-                upper = (mean + std).tolist()
-                lower = (mean - std).tolist()
+                upper = [m + s_ for m, s_ in zip(mean, std)]
+                lower = [m - s_ for m, s_ in zip(mean, std)]
                 fig.add_trace(go.Scatter(
                     x=wl + wl[::-1],
                     y=upper + lower[::-1],
                     fill="toself",
-                    fillcolor=f"rgba({r},{g},{b_},0.15)",
+                    fillcolor=f"rgba({r},{g},{b_},0.12)",
                     line=dict(color="rgba(255,255,255,0)"),
                     name=f"{name} ±std",
                     showlegend=False,
+                    hoverinfo="skip",
                 ))
 
         x_label = "파장 (nm)" if wavelengths else "밴드 인덱스"
         fig.update_layout(
             xaxis_title=x_label,
             yaxis_title="반사율",
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            legend=dict(
+                orientation="h", yanchor="bottom", y=1.02,
+                xanchor="right", x=1,
+                bgcolor="rgba(255,255,255,0.85)",
+                bordercolor="#ccc", borderwidth=1,
+            ),
             margin=dict(l=50, r=20, t=40, b=50),
             hovermode="x unified",
-            height=420,
+            height=460,
             plot_bgcolor="#fafafa",
             paper_bgcolor="#ffffff",
         )
-
-        div_html = fig.to_html(full_html=False, include_plotlyjs=False)
-        return div_html
+        return fig.to_html(full_html=False, include_plotlyjs=False)
 
     # ---------------------------------------------------------- #
     # Utility
