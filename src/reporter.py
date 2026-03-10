@@ -135,12 +135,14 @@ class Reporter:
         metadata: Dict[str, Any],
         metrics: Optional[Dict[str, Any]] = None,
         separability: Optional[Dict[str, Any]] = None,
+        veg_sep: Optional[Dict[str, Any]] = None,
     ) -> None:
         self.results.append(dict(
             filename=filename, data=data, class_map=class_map,
             class_info=class_info, spectra=spectra,
             wavelengths=wavelengths, metadata=metadata,
             metrics=metrics, separability=separability,
+            veg_sep=veg_sep,
         ))
 
     def render(self, output_path: str | Path) -> None:
@@ -244,6 +246,12 @@ class Reporter:
             '<div class="card">',
             '<h2>&#128202; 품질 평가 (Quality Assessment)</h2>',
             self._render_quality_section(result.get("metrics"), result.get("separability")),
+            '</div>',
+
+            # Vegetation separation card
+            '<div class="card">',
+            '<h2>&#127807; 식생 분리도 평가 (Vegetation Separation)</h2>',
+            self._render_veg_separation_card(result.get("veg_sep")),
             '</div>',
 
             '</div>',  # file-block
@@ -633,6 +641,145 @@ class Reporter:
                 f'font-size:13px;padding:5px 14px;">{interp}</span></p>'
             )
         return parts
+
+    def _render_veg_separation_card(
+        self,
+        veg_sep: Optional[Dict[str, Any]],
+    ) -> str:
+        """
+        Render the vegetation separation section:
+          - NDVI-based detection accuracy (Recall / Precision / F1) as progress bars
+          - Leaf ↔ Other class spectral distance bar chart
+        """
+        if not veg_sep:
+            return '<p style="color:#999;">식생 분리도 데이터가 없습니다.</p>'
+
+        note = veg_sep.get("note")
+        if note:
+            return f'<p style="color:#888;">{note}</p>'
+
+        try:
+            import plotly.graph_objects as go
+        except ImportError:
+            return '<p><em>pip install plotly 후 표시됩니다.</em></p>'
+
+        parts = []
+
+        leaf_names     = veg_sep.get("leaf_names", [])
+        recall         = veg_sep.get("ndvi_recall")
+        precision      = veg_sep.get("ndvi_precision")
+        f1             = veg_sep.get("ndvi_f1")
+        ndvi_gt_px     = veg_sep.get("ndvi_gt_pixels", 0)
+        leaf_pred_px   = veg_sep.get("leaf_pred_pixels", 0)
+        bars           = veg_sep.get("separation_bars", [])
+        min_sep        = veg_sep.get("min_separation")
+        mean_sep       = veg_sep.get("mean_separation")
+
+        # ── 감지된 잎 클래스 표시 ──────────────────────────────
+        leaf_badge = ", ".join(
+            f'<span class="badge" style="background:#2e7d62;padding:3px 10px;">'
+            f'{n}</span>' for n in leaf_names
+        ) or '<em>감지 못 함</em>'
+        parts.append(
+            f'<p style="margin-bottom:14px;font-size:13px;">'
+            f'<strong>감지된 잎 클래스:</strong> {leaf_badge}</p>'
+        )
+
+        # ── NDVI 기반 정확도 (Recall / Precision / F1) ─────────
+        if recall is not None:
+            def _pct_bar(val: float, color: str, label: str) -> str:
+                pct   = round(val * 100, 1)
+                width = max(2, round(pct))
+                if pct >= 85:   c = "#27ae60"
+                elif pct >= 65: c = "#2980b9"
+                elif pct >= 45: c = "#f39c12"
+                else:           c = "#e74c3c"
+                return (
+                    f'<div class="stat-box">'
+                    f'<div class="stat-val" style="color:{c};font-size:28px;">'
+                    f'{pct}%</div>'
+                    f'<div style="background:#eee;border-radius:4px;height:8px;'
+                    f'margin:6px 0 4px;">'
+                    f'<div style="background:{c};width:{width}%;height:8px;'
+                    f'border-radius:4px;"></div></div>'
+                    f'<div class="stat-lbl">{label}</div>'
+                    f'</div>'
+                )
+
+            parts += [
+                '<p style="font-size:12px;color:#555;margin-bottom:8px;">'
+                '▶ NDVI &gt; 0.15 픽셀을 식생 기준(Ground Truth)으로 사용</p>',
+                '<div class="stat-row">',
+                _pct_bar(recall,    "#27ae60", f"검출률 (Recall)<br>"
+                         f"<small>GT 식생 {ndvi_gt_px:,}px 중 검출</small>"),
+                _pct_bar(precision, "#2980b9", f"정밀도 (Precision)<br>"
+                         f"<small>예측 잎 {leaf_pred_px:,}px 중 정확</small>"),
+                _pct_bar(f1,        "#8e44ad", "F1 점수<br>"
+                         "<small>Recall × Precision 조화평균</small>"),
+                '</div>',
+            ]
+        else:
+            parts.append(
+                '<p style="color:#aaa;font-size:12px;">'
+                'NIR/Red 밴드 정보가 없어 NDVI 정확도를 계산하지 못했습니다.</p>'
+            )
+
+        # ── 잎 ↔ 비잎 스펙트럼 거리 바 차트 ───────────────────
+        if bars:
+            parts.append(
+                '<p style="font-size:12px;color:#555;margin:18px 0 6px;">'
+                '▶ 잎 클래스 ↔ 비잎 클래스 간 평균 스펙트럼 거리'
+                ' — 값이 클수록 잘 분리됩니다.</p>'
+            )
+
+            labels    = [b["label"]    for b in bars]
+            distances = [b["distance"] for b in bars]
+            # colour: green if above mean, orange if below
+            mean_d = float(np.mean(distances)) if distances else 0
+            colors  = [
+                "#27ae60" if d >= mean_d else "#f39c12"
+                for d in distances
+            ]
+
+            fig_bar = go.Figure(go.Bar(
+                x=distances,
+                y=labels,
+                orientation="h",
+                marker_color=colors,
+                text=[f"{d:.4f}" for d in distances],
+                textposition="outside",
+                hovertemplate="%{y}: %{x:.4f}<extra></extra>",
+            ))
+            fig_bar.add_vline(
+                x=mean_d, line_dash="dot", line_color="#888",
+                annotation_text=f"평균 {mean_d:.4f}",
+                annotation_position="top right",
+                annotation_font_size=11,
+            )
+            fig_bar.update_layout(
+                height=max(200, 40 * len(bars) + 80),
+                margin=dict(l=10, r=80, t=20, b=30),
+                xaxis_title="스펙트럼 유클리드 거리",
+                yaxis=dict(autorange="reversed"),
+                plot_bgcolor="#fafafa",
+                paper_bgcolor="#ffffff",
+                showlegend=False,
+            )
+            parts.append(fig_bar.to_html(full_html=False, include_plotlyjs=False))
+
+            # min / mean stat boxes
+            parts += [
+                '<div class="stat-row" style="margin-top:10px;">',
+                (f'<div class="stat-box"><div class="stat-val">'
+                 f'{min_sep:.4f}</div>'
+                 f'<div class="stat-lbl">최소 분리 거리 (가장 가까운 쌍)</div></div>'),
+                (f'<div class="stat-box"><div class="stat-val">'
+                 f'{mean_sep:.4f}</div>'
+                 f'<div class="stat-lbl">평균 분리 거리</div></div>'),
+                '</div>',
+            ]
+
+        return "\n".join(parts)
 
     def _separability_heatmap_html(
         self,

@@ -175,6 +175,17 @@ class Pipeline:
         # ---- 4b. Spectral separability ----
         sep = Evaluator.spectral_separability(spectra)
 
+        # ---- 4c. Vegetation separation quality ----
+        veg_sep = Evaluator.vegetation_separation_metrics(
+            data, class_map, spectra, wavelengths
+        )
+        if veg_sep.get("ndvi_f1") is not None:
+            logger.info(
+                f"  Vegetation F1: {veg_sep['ndvi_f1']:.3f}  "
+                f"Recall: {veg_sep['ndvi_recall']:.3f}  "
+                f"Precision: {veg_sep['ndvi_precision']:.3f}"
+            )
+
         # ---- 5. Save outputs ----
         out_cfg = self.config.get("output", {})
         file_out_dir = self.output_dir / stem
@@ -197,6 +208,7 @@ class Pipeline:
             metadata=meta,
             metrics=metrics,
             separability=sep,
+            veg_sep=veg_sep,
         )
 
         logger.info(f"  Outputs saved to: {file_out_dir}")
