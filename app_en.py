@@ -250,6 +250,13 @@ def _do_load_file(path_str: str) -> tuple:
 
 
 # ============================================================
+# Session state – run mode file scanner
+# ============================================================
+
+if "run_scan_files" not in st.session_state:
+    st.session_state["run_scan_files"] = []
+
+# ============================================================
 # Sidebar – Settings (pipeline run tab)
 # ============================================================
 
@@ -277,6 +284,56 @@ with st.sidebar:
         github_repo   = st.text_input("Repository (owner/repo)", placeholder="username/repo")
         github_folder = st.text_input("Sub-folder",              value="", placeholder="data/2024")
         github_token  = st.text_input("GitHub Token (private repos)", type="password")
+
+    st.markdown("---")
+
+    # ── Processing mode ───────────────────────────────────────
+    st.markdown("### 🎯 Processing Mode")
+    run_mode = st.radio(
+        "Processing mode",
+        ["🔍 Single File", "📦 Batch (all files)"],
+        horizontal=False,
+        label_visibility="collapsed",
+        key="run_mode_radio",
+    )
+
+    _run_single_file = None
+
+    if run_mode == "🔍 Single File":
+        if data_src == "Local Folder" and local_folder:
+            if st.button("📂 Scan Folder", use_container_width=True, key="run_scan_btn"):
+                _sp = Path(local_folder)
+                if _sp.is_dir():
+                    _exts = {".hdr", ".tif", ".tiff", ".h5", ".hdf5", ".mat"}
+                    _sf = sorted([f for f in _sp.rglob("*")
+                                  if f.suffix.lower() in _exts])
+                    _hdr_stems = {f.stem for f in _sf if f.suffix.lower() == ".hdr"}
+                    _sf = [f for f in _sf
+                           if not (f.suffix.lower() in {".raw", ".bil", ".bip", ".bsq"}
+                                   and f.stem in _hdr_stems)]
+                    st.session_state["run_scan_files"] = [str(f) for f in sorted(set(_sf))]
+                    if not st.session_state["run_scan_files"]:
+                        st.warning("No supported files found in this folder.")
+                else:
+                    st.warning("Please enter a valid folder path.")
+                    st.session_state["run_scan_files"] = []
+
+            if st.session_state["run_scan_files"]:
+                _run_single_file = st.selectbox(
+                    "File to process",
+                    st.session_state["run_scan_files"],
+                    format_func=lambda p: Path(p).name,
+                    key="run_file_select",
+                )
+                st.caption(f"📄 {Path(_run_single_file).name}")
+            else:
+                st.caption("📂 Scan to select a file.")
+        else:
+            st.caption("Available in Local Folder mode only.")
+    else:
+        if st.session_state["run_scan_files"]:
+            st.session_state["run_scan_files"] = []
+        st.caption("📋 Processes all files sequentially and saves one report per file.")
 
     st.markdown("---")
 
@@ -425,6 +482,8 @@ with tab_run:
             errors.append("Please enter a GitHub repository.")
         if needs_labels and not labels_csv:
             errors.append(f"Method '{method}' requires a labels CSV.")
+        if run_mode == "🔍 Single File" and not _run_single_file:
+            errors.append("Single File mode: scan the folder and select a file first.")
 
         if errors:
             for e in errors:
@@ -498,6 +557,7 @@ with tab_run:
                 "save_classification_map": True,
                 "save_spectra_csv":        True,
                 "save_report":             True,
+                "per_file_report":         run_mode == "📦 Batch (all files)",
             },
             "report": {
                 "title":            "Hyperspectral Field Crop Analysis",
@@ -517,15 +577,20 @@ with tab_run:
         root_log.setLevel(logging.DEBUG if verbose else logging.INFO)
 
         # Execute pipeline
-        pipeline_ok = False
+        import time as _time
+        pipeline_ok  = False
+        _elapsed_sec = 0.0
         try:
             with st.spinner("⏳ Analysing…  (may take several minutes for large images)"):
                 from src.pipeline import Pipeline
+                _t_start = _time.perf_counter()
                 pipeline = Pipeline(cfg)
                 pipeline.run(
                     labels_csv=labels_csv if labels_csv else None,
                     file_limit=int(file_limit) if file_limit else None,
+                    single_file=_run_single_file,
                 )
+                _elapsed_sec = _time.perf_counter() - _t_start
             pipeline_ok = True
 
         except Exception:
@@ -537,21 +602,29 @@ with tab_run:
 
         # Results
         if pipeline_ok:
-            st.success("✅ Analysis complete!")
+            _em, _es = divmod(int(_elapsed_sec), 60)
+            _elapsed_str = f"{_em}m {_es:02d}s" if _em else f"{_es}s"
+            st.success(f"✅ Analysis complete!  ⏱ Total time: **{_elapsed_str}**")
 
             out_p = Path(output_dir)
 
-            # Find the most recently written report_*.html
+            # Find all report_*.html files (root + per-file subdirectories)
             reports = sorted(
-                out_p.glob("report*.html"),
+                out_p.rglob("report*.html"),
                 key=lambda p: p.stat().st_mtime,
                 reverse=True,
             )
             if reports:
-                st.markdown(
-                    f"📄 **HTML Report:** `{reports[0].resolve()}`  \n"
-                    f"Open the file directly in your browser to view it."
-                )
+                if run_mode == "📦 Batch (all files)":
+                    st.markdown(f"📄 **HTML Reports ({len(reports)}):** (newest first)")
+                    for _rp in reports:
+                        st.caption(f"  `{_rp.resolve()}`")
+                    st.caption("Open any file directly in your browser to view it.")
+                else:
+                    st.markdown(
+                        f"📄 **HTML Report:** `{reports[0].resolve()}`  \n"
+                        f"Open the file directly in your browser to view it."
+                    )
 
             # Class-map previews
             class_maps = sorted(out_p.rglob("class_map.png"))

@@ -252,6 +252,13 @@ def _do_load_file(path_str: str) -> tuple:
 
 
 # ============================================================
+# Session state – run mode file scanner
+# ============================================================
+
+if "run_scan_files" not in st.session_state:
+    st.session_state["run_scan_files"] = []
+
+# ============================================================
 # Sidebar – Settings (pipeline run tab)
 # ============================================================
 
@@ -279,6 +286,56 @@ with st.sidebar:
         github_repo   = st.text_input("저장소 (owner/repo)",    placeholder="username/repo")
         github_folder = st.text_input("서브폴더",               value="", placeholder="data/2024")
         github_token  = st.text_input("GitHub 토큰 (비공개용)", type="password")
+
+    st.markdown("---")
+
+    # ── Processing mode ───────────────────────────────────────
+    st.markdown("### 🎯 처리 모드")
+    run_mode = st.radio(
+        "처리 모드",
+        ["🔍 단일 파일 선택", "📦 전체 배치 처리"],
+        horizontal=False,
+        label_visibility="collapsed",
+        key="run_mode_radio",
+    )
+
+    _run_single_file = None
+
+    if run_mode == "🔍 단일 파일 선택":
+        if data_src == "로컬 폴더" and local_folder:
+            if st.button("📂 폴더 스캔", use_container_width=True, key="run_scan_btn"):
+                _sp = Path(local_folder)
+                if _sp.is_dir():
+                    _exts = {".hdr", ".tif", ".tiff", ".h5", ".hdf5", ".mat"}
+                    _sf = sorted([f for f in _sp.rglob("*")
+                                  if f.suffix.lower() in _exts])
+                    _hdr_stems = {f.stem for f in _sf if f.suffix.lower() == ".hdr"}
+                    _sf = [f for f in _sf
+                           if not (f.suffix.lower() in {".raw", ".bil", ".bip", ".bsq"}
+                                   and f.stem in _hdr_stems)]
+                    st.session_state["run_scan_files"] = [str(f) for f in sorted(set(_sf))]
+                    if not st.session_state["run_scan_files"]:
+                        st.warning("지원 형식 파일을 찾지 못했습니다.")
+                else:
+                    st.warning("유효한 폴더 경로를 입력하세요.")
+                    st.session_state["run_scan_files"] = []
+
+            if st.session_state["run_scan_files"]:
+                _run_single_file = st.selectbox(
+                    "처리할 파일",
+                    st.session_state["run_scan_files"],
+                    format_func=lambda p: Path(p).name,
+                    key="run_file_select",
+                )
+                st.caption(f"📄 {Path(_run_single_file).name}")
+            else:
+                st.caption("📂 스캔하여 파일을 선택하세요.")
+        else:
+            st.caption("로컬 폴더 모드에서 사용 가능합니다.")
+    else:
+        if st.session_state["run_scan_files"]:
+            st.session_state["run_scan_files"] = []
+        st.caption("📋 모든 파일을 순차 처리하고 파일별로 리포트를 생성합니다.")
 
     st.markdown("---")
 
@@ -427,6 +484,8 @@ with tab_run:
             errors.append("GitHub 저장소를 입력해 주세요.")
         if needs_labels and not labels_csv:
             errors.append(f"{method} 방법은 라벨 CSV가 필요합니다.")
+        if run_mode == "🔍 단일 파일 선택" and not _run_single_file:
+            errors.append("단일 파일 모드: 폴더를 스캔하고 파일을 선택해 주세요.")
 
         if errors:
             for e in errors:
@@ -500,6 +559,7 @@ with tab_run:
                 "save_classification_map": True,
                 "save_spectra_csv":        True,
                 "save_report":             True,
+                "per_file_report":         run_mode == "📦 전체 배치 처리",
             },
             "report": {
                 "title":            "Hyperspectral Field Crop Analysis",
@@ -519,15 +579,20 @@ with tab_run:
         root_log.setLevel(logging.DEBUG if verbose else logging.INFO)
 
         # Execute pipeline
-        pipeline_ok = False
+        import time as _time
+        pipeline_ok  = False
+        _elapsed_sec = 0.0
         try:
             with st.spinner("⏳ 분석 중...  (데이터 크기에 따라 수 분이 걸릴 수 있습니다)"):
                 from src.pipeline import Pipeline
+                _t_start = _time.perf_counter()
                 pipeline = Pipeline(cfg)
                 pipeline.run(
                     labels_csv=labels_csv if labels_csv else None,
                     file_limit=int(file_limit) if file_limit else None,
+                    single_file=_run_single_file,
                 )
+                _elapsed_sec = _time.perf_counter() - _t_start
             pipeline_ok = True
 
         except Exception:
@@ -539,21 +604,29 @@ with tab_run:
 
         # Results
         if pipeline_ok:
-            st.success("✅ 분석 완료!")
+            _em, _es = divmod(int(_elapsed_sec), 60)
+            _elapsed_str = f"{_em}분 {_es:02d}초" if _em else f"{_es}초"
+            st.success(f"✅ 분석 완료!  ⏱ 총 소요시간: **{_elapsed_str}**")
 
             out_p = Path(output_dir)
 
-            # Find the most recently written report_*.html
+            # Find all report_*.html files (root + per-file subdirectories)
             reports = sorted(
-                out_p.glob("report*.html"),
+                out_p.rglob("report*.html"),
                 key=lambda p: p.stat().st_mtime,
                 reverse=True,
             )
             if reports:
-                st.markdown(
-                    f"📄 **HTML 리포트:** `{reports[0].resolve()}`  \n"
-                    f"브라우저에서 직접 파일을 열어 확인하세요."
-                )
+                if run_mode == "📦 전체 배치 처리":
+                    st.markdown(f"📄 **HTML 리포트 ({len(reports)}개):** (최신순)")
+                    for _rp in reports:
+                        st.caption(f"  `{_rp.resolve()}`")
+                    st.caption("브라우저에서 직접 파일을 열어 확인하세요.")
+                else:
+                    st.markdown(
+                        f"📄 **HTML 리포트:** `{reports[0].resolve()}`  \n"
+                        f"브라우저에서 직접 파일을 열어 확인하세요."
+                    )
 
             # Class-map previews
             class_maps = sorted(out_p.rglob("class_map.png"))

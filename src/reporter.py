@@ -90,6 +90,7 @@ _T_KO: Dict[str, str] = {
     "wavelength_nm":      "파장 (nm)",
     "band_index":         "밴드 인덱스",
     "reflectance":        "반사율",
+    "processing_time":    "처리 시간",
 }
 
 _T_EN: Dict[str, str] = {
@@ -151,6 +152,7 @@ _T_EN: Dict[str, str] = {
     "wavelength_nm":      "Wavelength (nm)",
     "band_index":         "Band Index",
     "reflectance":        "Reflectance",
+    "processing_time":    "Processing Time",
 }
 
 
@@ -272,13 +274,14 @@ class Reporter:
         metrics: Optional[Dict[str, Any]] = None,
         separability: Optional[Dict[str, Any]] = None,
         veg_sep: Optional[Dict[str, Any]] = None,
+        elapsed_sec: Optional[float] = None,
     ) -> None:
         self.results.append(dict(
             filename=filename, data=data, class_map=class_map,
             class_info=class_info, spectra=spectra,
             wavelengths=wavelengths, metadata=metadata,
             metrics=metrics, separability=separability,
-            veg_sep=veg_sep,
+            veg_sep=veg_sep, elapsed_sec=elapsed_sec,
         ))
 
     def render(self, output_path: str | Path) -> None:
@@ -330,6 +333,14 @@ class Reporter:
         H, W, B = data.shape
         n_px    = H * W
 
+        # Elapsed time formatting
+        elapsed_sec = result.get("elapsed_sec")
+        if elapsed_sec is not None:
+            m, s = divmod(int(elapsed_sec), 60)
+            elapsed_str = f"{m}m {s:02d}s" if m else f"{s}s"
+        else:
+            elapsed_str = "—"
+
         # Pre-compute RGB array once (reused for per-class overlays)
         rgb_arr = self._get_rgb_array(data, wl, mode="rgb")
 
@@ -339,11 +350,12 @@ class Reporter:
 
             # ── Summary stats ─────────────────────────────────────
             '<div class="stat-row">',
-            self._stat_box(self._t("resolution"),   f"{W} × {H}"),
-            self._stat_box(self._t("bands"),         str(B)),
-            self._stat_box(self._t("total_pixels"),  f"{n_px:,}"),
-            self._stat_box(self._t("n_classes"),     str(len(class_info))),
-            self._stat_box(self._t("format"),        meta.get("format", "—")),
+            self._stat_box(self._t("resolution"),      f"{W} × {H}"),
+            self._stat_box(self._t("bands"),            str(B)),
+            self._stat_box(self._t("total_pixels"),     f"{n_px:,}"),
+            self._stat_box(self._t("n_classes"),        str(len(class_info))),
+            self._stat_box(self._t("format"),           meta.get("format", "—")),
+            self._stat_box(self._t("processing_time"),  elapsed_str),
             '</div>',
 
             # ── Overview images (RGB / CIR / Classification map) ──

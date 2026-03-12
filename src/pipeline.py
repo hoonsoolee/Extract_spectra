@@ -52,6 +52,7 @@ class Pipeline:
         self,
         labels_csv: Optional[str] = None,
         file_limit: Optional[int] = None,
+        single_file: Optional[str] = None,
     ) -> None:
         """
         Discover and process all files from the configured source(s).
@@ -60,14 +61,21 @@ class Pipeline:
         ----------
         labels_csv  : path to labelled-pixels CSV (for supervised method)
         file_limit  : stop after this many files (useful for testing)
+        single_file : if given, process only this specific local file path
+                      (skips discovery; file_limit is ignored)
         """
         data_cfg = self.config.get("data", {})
+        out_cfg  = self.config.get("output", {})
+        per_file_report = out_cfg.get("per_file_report", False)
 
-        files_local  = self._discover_local(data_cfg)
-        files_github = self._discover_github(data_cfg)
-
-        all_tasks = [("local", f) for f in files_local] + \
-                    [("github", f) for f in files_github]
+        # ── File discovery ─────────────────────────────────────────
+        if single_file:
+            all_tasks = [("local", Path(single_file))]
+        else:
+            files_local  = self._discover_local(data_cfg)
+            files_github = self._discover_github(data_cfg)
+            all_tasks = [("local", f) for f in files_local] + \
+                        [("github", f) for f in files_github]
 
         if not all_tasks:
             logger.warning(
@@ -76,7 +84,7 @@ class Pipeline:
             )
             return
 
-        if file_limit:
+        if file_limit and not single_file:
             all_tasks = all_tasks[:file_limit]
 
         logger.info(f"Total files to process: {len(all_tasks)}")
@@ -85,7 +93,7 @@ class Pipeline:
         t0 = time.time()
 
         for i, (source, file_ref) in enumerate(all_tasks, 1):
-            fname = Path(file_ref).name if source == "local" else Path(file_ref).name
+            fname = Path(file_ref).name
             logger.info(f"\n{'='*60}")
             logger.info(f"[{i}/{len(all_tasks)}] {fname}  (source: {source})")
             logger.info(f"{'='*60}")
@@ -93,6 +101,17 @@ class Pipeline:
             try:
                 self._process_file(source, file_ref, data_cfg, labels_csv)
                 ok += 1
+
+                # ── Per-file report (batch mode with individual reports) ──
+                if per_file_report and out_cfg.get("save_report", True) \
+                        and self.reporter.results:
+                    stem         = Path(file_ref).stem
+                    ts           = time.strftime("%Y%m%d_%H%M%S")
+                    file_out_dir = self.output_dir / stem
+                    file_out_dir.mkdir(parents=True, exist_ok=True)
+                    self.reporter.render(file_out_dir / f"report_{ts}.html")
+                    self.reporter.results.clear()   # reset for next file
+
             except Exception as e:
                 logger.error(f"FAILED: {fname}\n{traceback.format_exc()}")
                 failed += 1
@@ -103,11 +122,20 @@ class Pipeline:
             f"{len(all_tasks)} total  ({elapsed:.1f}s)"
         )
 
-        # Generate consolidated HTML report (timestamped – never overwrites)
-        out_cfg = self.config.get("output", {})
-        if out_cfg.get("save_report", True) and self.reporter.results:
+        # ── Final report ───────────────────────────────────────────
+        # • single_file mode  → report goes into output/{stem}/
+        # • combined batch    → report goes into output/
+        # • per_file_report   → already rendered above; nothing to do
+        if not per_file_report and out_cfg.get("save_report", True) \
+                and self.reporter.results:
             ts = time.strftime("%Y%m%d_%H%M%S")
-            report_path = self.output_dir / f"report_{ts}.html"
+            if single_file:
+                stem       = Path(single_file).stem
+                report_dir = self.output_dir / stem
+                report_dir.mkdir(parents=True, exist_ok=True)
+                report_path = report_dir / f"report_{ts}.html"
+            else:
+                report_path = self.output_dir / f"report_{ts}.html"
             self.reporter.render(report_path)
 
     # ============================================================
@@ -121,8 +149,9 @@ class Pipeline:
         data_cfg: dict,
         labels_csv: Optional[str],
     ) -> None:
-        fname = Path(file_ref).name
-        stem  = Path(file_ref).stem
+        fname    = Path(file_ref).name
+        stem     = Path(file_ref).stem
+        t_file   = time.time()   # wall-clock start for total elapsed
 
         # ---- 1. Load ----
         t0 = time.time()
@@ -199,6 +228,9 @@ class Pipeline:
             self._save_class_map(class_map, class_info, file_out_dir / "class_map.png")
 
         # ---- 6. Add to report ----
+        elapsed_sec = time.time() - t_file
+        logger.info(f"  Total elapsed: {elapsed_sec:.1f}s")
+
         self.reporter.add_result(
             filename=fname,
             data=data,
@@ -210,6 +242,7 @@ class Pipeline:
             metrics=metrics,
             separability=sep,
             veg_sep=veg_sep,
+            elapsed_sec=elapsed_sec,
         )
 
         logger.info(f"  Outputs saved to: {file_out_dir}")
