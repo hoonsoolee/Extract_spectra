@@ -502,6 +502,7 @@ with tab_run:
             "report": {
                 "title":            "Hyperspectral Field Crop Analysis",
                 "spectra_show_std": True,
+                "lang":             "en",
             },
         }
 

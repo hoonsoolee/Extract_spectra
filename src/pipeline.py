@@ -37,7 +37,8 @@ class Pipeline:
         self.prep    = Preprocessor(config)
         self.clf     = HyperspectralClassifier(config)
         self.extr    = SpectrumExtractor(config)
-        self.reporter = Reporter(config)
+        _lang = config.get("report", {}).get("lang", "ko")
+        self.reporter = Reporter(config, lang=_lang)
 
         out_cfg = config.get("output", {})
         self.output_dir = Path(out_cfg.get("dir", "./output"))

@@ -5,9 +5,11 @@ Generates a self-contained HTML report for one or multiple processed images.
 Includes:
   - RGB composite & False Color Infrared (CIR) images
   - Classification map (all classes combined)
-  - Per-class individual overlay images (new)
+  - Per-class individual overlay images
   - Interactive spectral plots (Plotly)
   - Per-class statistics table
+
+Language support: pass lang="ko" (default) or lang="en" to Reporter().
 """
 
 import base64
@@ -26,11 +28,138 @@ logger = logging.getLogger(__name__)
 
 
 # ===================================================================
+# Translation dictionaries
+# ===================================================================
+
+_T_KO: Dict[str, str] = {
+    "html_lang":          "ko",
+    "generated_at":       "생성 시각",
+    "files_processed":    "처리 파일 수",
+    "toc":                "목차",
+    "resolution":         "해상도",
+    "bands":              "밴드 수",
+    "total_pixels":       "총 픽셀",
+    "n_classes":          "클래스 수",
+    "format":             "형식",
+    "image_overview":     "📷 이미지 개요",
+    "rgb_composite":      "RGB 합성",
+    "cir_falsecolor":     "CIR 위색도 (NIR-R-G)",
+    "class_map":          "통합 분류 맵",
+    "per_class_images":   "🗂️ 클래스별 분류 이미지",
+    "per_class_caption":  "각 클래스 픽셀을 해당 색상으로 강조, 나머지는 그레이스케일로 표시",
+    "class_summary":      "📊 분류 요약",
+    "spectra_chart":      "📈 클래스별 반사율 스펙트럼",
+    "quality_title":      "&#128202; 품질 평가 (Quality Assessment)",
+    "veg_sep_title":      "&#127807; 식생 분리도 평가 (Vegetation Separation)",
+    "col_class":          "클래스",
+    "col_id":             "ID",
+    "col_pixels":         "픽셀 수",
+    "col_ratio":          "비율",
+    "sep_caption":        "▶ 클래스 평균 스펙트럼 간 유클리드 거리 — 값이 클수록 클래스가 잘 구별됩니다.",
+    "install_plotly":     "pip install plotly 후 표시됩니다.",
+    "no_quality":         "품질 지표를 계산할 수 없습니다.",
+    "val_accuracy":       "검증 정확도 (Validation Accuracy)",
+    "train_val_px":       "학습: {n_tr}px  /  검증: {n_val}px",
+    "train_pixels":       "학습 픽셀 수",
+    "val_pixels":         "검증 픽셀 수",
+    "val_accuracy_lbl":   "검증 정확도",
+    "cluster_quality":    "클러스터 품질 점수",
+    "silhouette_note":    "Silhouette 기반 (−1→0 % ~ +1→100 %)",
+    "n_classes_lbl":      "클래스 수",
+    "no_veg_data":        "식생 분리도 데이터가 없습니다.",
+    "detected_leaf":      "감지된 잎 클래스",
+    "none_detected":      "감지 못 함",
+    "ndvi_gt_note":       "▶ NDVI &gt; 0.15 픽셀을 식생 기준(Ground Truth)으로 사용",
+    "recall_lbl":         "검출률 (Recall)",
+    "recall_sub":         "GT 식생 {gt_px:,}px 중 검출",
+    "precision_lbl":      "정밀도 (Precision)",
+    "precision_sub":      "예측 잎 {leaf_px:,}px 중 정확",
+    "f1_lbl":             "F1 점수",
+    "f1_sub":             "Recall × Precision 조화평균",
+    "no_ndvi":            "NIR/Red 밴드 정보가 없어 NDVI 정확도를 계산하지 못했습니다.",
+    "sep_dist_caption":   "▶ 잎 클래스 ↔ 비잎 클래스 간 평균 스펙트럼 거리 — 값이 클수록 잘 분리됩니다.",
+    "sep_dist_mean":      "평균 {mean:.4f}",
+    "sep_dist_xaxis":     "스펙트럼 유클리드 거리",
+    "min_sep":            "최소 분리 거리 (가장 가까운 쌍)",
+    "mean_sep":           "평균 분리 거리",
+    "heatmap_caption":    "pip install plotly 후 분리도 히트맵이 표시됩니다.",
+    "dist_label":         "거리",
+    "sep_matrix_title":   "스펙트럼 분리도 행렬 (클래스 평균 스펙트럼 간 유클리드 거리)",
+    "axis_class":         "클래스",
+    "no_chart":           "pip install plotly 후 차트가 표시됩니다.",
+    "wavelength_nm":      "파장 (nm)",
+    "band_index":         "밴드 인덱스",
+    "reflectance":        "반사율",
+}
+
+_T_EN: Dict[str, str] = {
+    "html_lang":          "en",
+    "generated_at":       "Generated",
+    "files_processed":    "Files processed",
+    "toc":                "Table of Contents",
+    "resolution":         "Resolution",
+    "bands":              "Bands",
+    "total_pixels":       "Total Pixels",
+    "n_classes":          "Classes",
+    "format":             "Format",
+    "image_overview":     "📷 Image Overview",
+    "rgb_composite":      "RGB Composite",
+    "cir_falsecolor":     "CIR False Color (NIR-R-G)",
+    "class_map":          "Classification Map",
+    "per_class_images":   "🗂️ Per-Class Classification Images",
+    "per_class_caption":  "Each class highlighted in its assigned colour; remaining pixels shown in greyscale",
+    "class_summary":      "📊 Classification Summary",
+    "spectra_chart":      "📈 Reflectance Spectra by Class",
+    "quality_title":      "&#128202; Quality Assessment",
+    "veg_sep_title":      "&#127807; Vegetation Separation Assessment",
+    "col_class":          "Class",
+    "col_id":             "ID",
+    "col_pixels":         "Pixels",
+    "col_ratio":          "Ratio",
+    "sep_caption":        "▶ Euclidean distances between class mean spectra — larger values indicate better class separation.",
+    "install_plotly":     "Install plotly to display this section.",
+    "no_quality":         "Quality metrics unavailable.",
+    "val_accuracy":       "Validation Accuracy",
+    "train_val_px":       "Train: {n_tr}px  /  Val: {n_val}px",
+    "train_pixels":       "Training Pixels",
+    "val_pixels":         "Validation Pixels",
+    "val_accuracy_lbl":   "Validation Accuracy",
+    "cluster_quality":    "Cluster Quality Score",
+    "silhouette_note":    "Silhouette-based (−1→0 % ~ +1→100 %)",
+    "n_classes_lbl":      "Classes",
+    "no_veg_data":        "No vegetation separation data available.",
+    "detected_leaf":      "Detected Leaf Classes",
+    "none_detected":      "None detected",
+    "ndvi_gt_note":       "▶ NDVI &gt; 0.15 pixels used as vegetation ground truth",
+    "recall_lbl":         "Recall",
+    "recall_sub":         "{gt_px:,} GT vegetation px detected",
+    "precision_lbl":      "Precision",
+    "precision_sub":      "{leaf_px:,} predicted leaf px correct",
+    "f1_lbl":             "F1 Score",
+    "f1_sub":             "Harmonic mean of Recall &amp; Precision",
+    "no_ndvi":            "NIR/Red band information unavailable — NDVI accuracy could not be computed.",
+    "sep_dist_caption":   "▶ Mean spectral distance between leaf ↔ non-leaf classes — larger values indicate better separation.",
+    "sep_dist_mean":      "Mean {mean:.4f}",
+    "sep_dist_xaxis":     "Spectral Euclidean Distance",
+    "min_sep":            "Min Separation Distance (closest pair)",
+    "mean_sep":           "Mean Separation Distance",
+    "heatmap_caption":    "Install plotly to display separability heatmap.",
+    "dist_label":         "Distance",
+    "sep_matrix_title":   "Spectral Separability Matrix (Euclidean distance between class mean spectra)",
+    "axis_class":         "Class",
+    "no_chart":           "Install plotly to display chart.",
+    "wavelength_nm":      "Wavelength (nm)",
+    "band_index":         "Band Index",
+    "reflectance":        "Reflectance",
+}
+
+
+# ===================================================================
 # HTML TEMPLATE
 # ===================================================================
 
 _HTML_HEAD = """<!DOCTYPE html>
-<html lang="ko">
+<html lang="{html_lang}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -49,12 +178,12 @@ _HTML_HEAD = """<!DOCTYPE html>
   .card h2 {{ font-size: 18px; color: #1a3a5c; border-bottom: 2px solid #2e7d62;
               padding-bottom: 8px; margin-bottom: 16px; }}
   /* Overview images: max 3 columns */
-  .img-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  .img-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
                gap: 16px; }}
-  /* Per-class images: 2–4 columns depending on viewport */
+  /* Per-class images: larger grid for easier visual inspection */
   .class-img-grid {{ display: grid;
-                     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-                     gap: 14px; }}
+                     grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+                     gap: 18px; }}
   .img-card {{ text-align: center; }}
   .img-card img {{ width: 100%; border-radius: 6px; border: 1px solid #ddd; }}
   .img-card .img-title {{
@@ -63,13 +192,13 @@ _HTML_HEAD = """<!DOCTYPE html>
     font-size: 11px; color: #777; margin-top: 2px; }}
   .class-card {{
     background: #fafafa; border: 1px solid #e0e0e0; border-radius: 8px;
-    padding: 10px; text-align: center; transition: box-shadow .2s; }}
-  .class-card:hover {{ box-shadow: 0 4px 12px rgba(0,0,0,.12); }}
+    padding: 12px; text-align: center; transition: box-shadow .2s; }}
+  .class-card:hover {{ box-shadow: 0 4px 14px rgba(0,0,0,.14); }}
   .class-card img {{ width: 100%; border-radius: 4px; }}
   .class-card .cls-name {{
-    margin-top: 8px; font-size: 13px; font-weight: 700; }}
+    margin-top: 10px; font-size: 14px; font-weight: 700; }}
   .class-card .cls-stats {{
-    font-size: 11px; color: #666; margin-top: 3px; }}
+    font-size: 12px; color: #666; margin-top: 4px; }}
   .color-dot {{ display: inline-block; width: 10px; height: 10px;
                 border-radius: 50%; margin-right: 4px; vertical-align: middle; }}
   table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
@@ -115,10 +244,17 @@ _HTML_FOOT = """
 class Reporter:
     """Accumulate per-file results and render a final HTML report."""
 
-    def __init__(self, config: dict):
-        self.cfg  = config
-        self.rcfg = config.get("report", {})
+    def __init__(self, config: dict, lang: str = "ko"):
+        self.cfg    = config
+        self.rcfg   = config.get("report", {})
+        self.lang   = lang
+        self._labels: Dict[str, str] = _T_EN if lang == "en" else _T_KO
         self.results: List[Dict[str, Any]] = []
+
+    def _t(self, key: str, **kwargs) -> str:
+        """Return translated string for *key*, optionally formatted with kwargs."""
+        s = self._labels.get(key, key)
+        return s.format(**kwargs) if kwargs else s
 
     # ---------------------------------------------------------- #
     # Public
@@ -154,10 +290,10 @@ class Reporter:
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         html_parts = [
-            _HTML_HEAD.format(title=title),
+            _HTML_HEAD.format(title=title, html_lang=self._t("html_lang")),
             f'<div class="header"><h1>{title}</h1>'
-            f'<p>생성 시각: {timestamp} &nbsp;|&nbsp; '
-            f'처리 파일 수: {len(self.results)}</p></div>',
+            f'<p>{self._t("generated_at")}: {timestamp} &nbsp;|&nbsp; '
+            f'{self._t("files_processed")}: {len(self.results)}</p></div>',
         ]
 
         # Table of contents
@@ -166,7 +302,7 @@ class Reporter:
             for i, r in enumerate(self.results)
         )
         html_parts.append(
-            f'<div class="toc"><h3>목차</h3><ul>{toc_items}</ul></div>'
+            f'<div class="toc"><h3>{self._t("toc")}</h3><ul>{toc_items}</ul></div>'
         )
 
         for i, result in enumerate(self.results):
@@ -201,56 +337,56 @@ class Reporter:
             f'<div class="file-block" id="file-{idx}">',
             f'<h2>📁 {fname}</h2>',
 
-            # ── 요약 통계 ──────────────────────────────────────────
+            # ── Summary stats ─────────────────────────────────────
             '<div class="stat-row">',
-            self._stat_box("해상도",  f"{W} × {H}"),
-            self._stat_box("밴드 수", str(B)),
-            self._stat_box("총 픽셀", f"{n_px:,}"),
-            self._stat_box("클래스 수", str(len(class_info))),
-            self._stat_box("형식",    meta.get("format", "—")),
+            self._stat_box(self._t("resolution"),   f"{W} × {H}"),
+            self._stat_box(self._t("bands"),         str(B)),
+            self._stat_box(self._t("total_pixels"),  f"{n_px:,}"),
+            self._stat_box(self._t("n_classes"),     str(len(class_info))),
+            self._stat_box(self._t("format"),        meta.get("format", "—")),
             '</div>',
 
-            # ── 개요 이미지 (RGB / CIR / 통합 분류 맵) ───────────
+            # ── Overview images (RGB / CIR / Classification map) ──
             '<div class="card">',
-            '<h2>📷 이미지 개요</h2>',
+            f'<h2>{self._t("image_overview")}</h2>',
             '<div class="img-grid">',
-            self._img_card("RGB 합성",
+            self._img_card(self._t("rgb_composite"),
                            self._array_to_b64(rgb_arr)),
-            self._img_card("CIR 위색도 (NIR-R-G)",
+            self._img_card(self._t("cir_falsecolor"),
                            self._array_to_b64(self._get_rgb_array(data, wl, "cir"))),
-            self._img_card("통합 분류 맵",
+            self._img_card(self._t("class_map"),
                            self._make_class_map_img(class_map, class_info)),
             '</div></div>',
 
-            # ── 클래스별 개별 이미지 ───────────────────────────────
+            # ── Per-class images ───────────────────────────────────
             '<div class="card">',
-            '<h2>🗂️ 클래스별 분류 이미지</h2>',
-            '<p style="font-size:12px;color:#888;margin-bottom:14px;">'
-            '각 클래스 픽셀을 해당 색상으로 강조, 나머지는 그레이스케일로 표시</p>',
+            f'<h2>{self._t("per_class_images")}</h2>',
+            f'<p style="font-size:12px;color:#888;margin-bottom:14px;">'
+            f'{self._t("per_class_caption")}</p>',
             self._render_per_class_images(data, class_map, class_info, rgb_arr, n_px),
             '</div>',
 
-            # ── 분류 요약 테이블 ───────────────────────────────────
+            # ── Classification summary table ───────────────────────
             '<div class="card">',
-            '<h2>📊 분류 요약</h2>',
+            f'<h2>{self._t("class_summary")}</h2>',
             self._class_table(class_info, n_px),
             '</div>',
 
-            # ── 스펙트럼 차트 ──────────────────────────────────────
+            # ── Spectral chart ─────────────────────────────────────
             '<div class="card">',
-            '<h2>📈 클래스별 반사율 스펙트럼</h2>',
+            f'<h2>{self._t("spectra_chart")}</h2>',
             self._spectra_plot_html(spectra, wl),
             '</div>',
 
-            # Quality assessment card
+            # ── Quality assessment ─────────────────────────────────
             '<div class="card">',
-            '<h2>&#128202; 품질 평가 (Quality Assessment)</h2>',
+            f'<h2>{self._t("quality_title")}</h2>',
             self._render_quality_section(result.get("metrics"), result.get("separability")),
             '</div>',
 
-            # Vegetation separation card
+            # ── Vegetation separation ──────────────────────────────
             '<div class="card">',
-            '<h2>&#127807; 식생 분리도 평가 (Vegetation Separation)</h2>',
+            f'<h2>{self._t("veg_sep_title")}</h2>',
             self._render_veg_separation_card(result.get("veg_sep")),
             '</div>',
 
@@ -270,9 +406,8 @@ class Reporter:
         rgb_arr: np.ndarray,
         total_px: int,
     ) -> str:
-        """Build a grid of per-class highlight images."""
+        """Build a grid of per-class highlight images (larger for visual inspection)."""
         cards = []
-        # Sort by pixel count descending for visual clarity
         for cinfo in sorted(class_info, key=lambda x: -x["n_pixels"]):
             b64   = self._make_single_class_img(class_map, cinfo, rgb_arr)
             r, g, b_ = cinfo["color"]
@@ -297,10 +432,11 @@ class Reporter:
     ) -> str:
         """
         Highlight one class in its class color on a darkened grayscale background.
+        Rendered at high resolution (720 px) for clear visual inspection.
         """
         # Grayscale background (darkened to 30%)
-        gray = np.mean(rgb_arr, axis=2, keepdims=True)  # (H, W, 1)
-        bg   = np.repeat(gray * 0.30, 3, axis=2)        # (H, W, 3) dark gray
+        gray = np.mean(rgb_arr, axis=2, keepdims=True)
+        bg   = np.repeat(gray * 0.30, 3, axis=2)
 
         # Overlay class pixels in class color
         result = bg.copy()
@@ -368,13 +504,16 @@ class Reporter:
 
     @staticmethod
     def _array_to_b64(arr: np.ndarray) -> str:
-        """Convert (H, W, 3) float [0,1] to base64-encoded PNG."""
-        fig, ax = plt.subplots(figsize=(4, 4), dpi=90)
+        """
+        Convert (H, W, 3) float [0,1] to base64-encoded PNG.
+        Uses figsize=6×6 at dpi=120 → 720×720 px for crisp display at large sizes.
+        """
+        fig, ax = plt.subplots(figsize=(6, 6), dpi=120)
         ax.imshow(arr)
         ax.axis("off")
         fig.tight_layout(pad=0)
         buf = io.BytesIO()
-        fig.savefig(buf, format="png", bbox_inches="tight", pad_inches=0, dpi=90)
+        fig.savefig(buf, format="png", bbox_inches="tight", pad_inches=0, dpi=120)
         plt.close(fig)
         buf.seek(0)
         return base64.b64encode(buf.read()).decode("ascii")
@@ -419,7 +558,10 @@ class Reporter:
         return (
             "<table>"
             "<thead><tr>"
-            "<th>클래스</th><th>ID</th><th>픽셀 수</th><th>비율</th>"
+            f"<th>{self._t('col_class')}</th>"
+            f"<th>{self._t('col_id')}</th>"
+            f"<th>{self._t('col_pixels')}</th>"
+            f"<th>{self._t('col_ratio')}</th>"
             "</tr></thead>"
             f"<tbody>{rows}</tbody></table>"
         )
@@ -440,7 +582,7 @@ class Reporter:
           Both include the spectral separability heatmap.
         """
         try:
-            import plotly.graph_objects as go
+            import plotly.graph_objects as go  # noqa: F401
             has_plotly = True
         except ImportError:
             has_plotly = False
@@ -448,12 +590,10 @@ class Reporter:
         parts = []
 
         if metrics:
-            # ── Detect method ──────────────────────────────────────
             is_supervised = (
                 metrics.get("method") in ("supervised", "cnn")
                 and metrics.get("accuracy") is not None
             )
-
             if is_supervised:
                 parts += self._render_supervised_quality(metrics, has_plotly)
             else:
@@ -462,14 +602,16 @@ class Reporter:
         # ── Spectral separability heatmap (always shown) ──────────
         if sep and len(sep.get("names", [])) >= 2:
             parts.append(
-                '<p style="font-size:12px;color:#666;margin:16px 0 8px 0;">'
-                '▶ 클래스 평균 스펙트럼 간 유클리드 거리 — 값이 클수록 클래스가 잘 구별됩니다.</p>'
+                f'<p style="font-size:12px;color:#666;margin:16px 0 8px 0;">'
+                f'{self._t("sep_caption")}</p>'
             )
-            parts.append(self._separability_heatmap_html(sep) if has_plotly
-                         else '<p><em>pip install plotly 후 표시됩니다.</em></p>')
+            parts.append(
+                self._separability_heatmap_html(sep) if has_plotly
+                else f'<p><em>{self._t("install_plotly")}</em></p>'
+            )
 
         if not parts:
-            parts.append('<p style="color:#999;">품질 지표를 계산할 수 없습니다.</p>')
+            parts.append(f'<p style="color:#999;">{self._t("no_quality")}</p>')
 
         return "\n".join(parts)
 
@@ -482,11 +624,10 @@ class Reporter:
     ) -> list:
         import plotly.graph_objects as go
 
-        acc    = metrics["accuracy"]          # 0.0–1.0
+        acc    = metrics["accuracy"]
         f1     = metrics.get("macro_f1")
         n_tr   = metrics.get("n_train", "?")
         n_val  = metrics.get("n_val",   "?")
-
         acc_pct = acc * 100
 
         if acc_pct >= 90:   gauge_color = "#27ae60"
@@ -502,9 +643,9 @@ class Reporter:
                 value=round(acc_pct, 1),
                 number={"suffix": "%", "font": {"size": 44, "color": gauge_color}},
                 title={"text": (
-                    "검증 정확도 (Validation Accuracy)"
+                    f"{self._t('val_accuracy')}"
                     "<br><span style='font-size:0.75em;color:#888;'>"
-                    f"학습: {n_tr}px  /  검증: {n_val}px</span>"
+                    f"{self._t('train_val_px', n_tr=n_tr, n_val=n_val)}</span>"
                 )},
                 gauge={
                     "axis": {"range": [0, 100], "ticksuffix": "%"},
@@ -525,8 +666,7 @@ class Reporter:
                 },
             ))
             fig.update_layout(
-                height=280,
-                margin=dict(l=30, r=30, t=100, b=10),
+                height=280, margin=dict(l=30, r=30, t=100, b=10),
                 paper_bgcolor="white",
             )
             parts.append(fig.to_html(full_html=False, include_plotlyjs=False))
@@ -535,19 +675,18 @@ class Reporter:
                 f'<div class="stat-box">'
                 f'<div class="stat-val" style="color:{gauge_color}">'
                 f'{acc_pct:.1f}%</div>'
-                f'<div class="stat-lbl">검증 정확도</div></div>'
+                f'<div class="stat-lbl">{self._t("val_accuracy_lbl")}</div></div>'
             )
 
-        # Secondary stat boxes
         f1_text = f"{f1*100:.1f}%" if f1 is not None else "N/A"
         parts += [
             '<div class="stat-row" style="margin-top:12px;">',
             (f'<div class="stat-box"><div class="stat-val">{f1_text}</div>'
              f'<div class="stat-lbl">Macro F1-Score</div></div>'),
             (f'<div class="stat-box"><div class="stat-val">{n_tr}</div>'
-             f'<div class="stat-lbl">학습 픽셀 수</div></div>'),
+             f'<div class="stat-lbl">{self._t("train_pixels")}</div></div>'),
             (f'<div class="stat-box"><div class="stat-val">{n_val}</div>'
-             f'<div class="stat-lbl">검증 픽셀 수</div></div>'),
+             f'<div class="stat-lbl">{self._t("val_pixels")}</div></div>'),
             '</div>',
         ]
         return parts
@@ -566,8 +705,6 @@ class Reporter:
         interp = metrics.get("interpretation", "")
         n_cls  = metrics.get("n_classes", "?")
 
-        # Convert silhouette (-1~1) → quality score (0~100 %)
-        # sil=1 → 100%, sil=0 → 50%, sil=-1 → 0%
         quality = (float(sil) + 1) / 2 * 100 if sil is not None else None
 
         if quality is None:
@@ -585,9 +722,9 @@ class Reporter:
                 value=round(quality, 1),
                 number={"suffix": "%", "font": {"size": 44, "color": gauge_color}},
                 title={"text": (
-                    "클러스터 품질 점수"
+                    f"{self._t('cluster_quality')}"
                     "<br><span style='font-size:0.75em;color:#888;'>"
-                    "Silhouette 기반 (−1→0 % ~ +1→100 %)</span>"
+                    f"{self._t('silhouette_note')}</span>"
                 )},
                 gauge={
                     "axis": {"range": [0, 100], "ticksuffix": "%"},
@@ -608,8 +745,7 @@ class Reporter:
                 },
             ))
             fig.update_layout(
-                height=280,
-                margin=dict(l=30, r=30, t=100, b=10),
+                height=280, margin=dict(l=30, r=30, t=100, b=10),
                 paper_bgcolor="white",
             )
             parts.append(fig.to_html(full_html=False, include_plotlyjs=False))
@@ -618,11 +754,10 @@ class Reporter:
                 f'<div class="stat-box">'
                 f'<div class="stat-val" style="color:{gauge_color}">'
                 f'{quality:.1f}%</div>'
-                f'<div class="stat-lbl">클러스터 품질 점수</div></div>'
+                f'<div class="stat-lbl">{self._t("cluster_quality")}</div></div>'
             )
 
-        # Secondary stat boxes
-        db_text = f"{db:.3f}" if db is not None else "N/A"
+        db_text  = f"{db:.3f}"  if db  is not None else "N/A"
         sil_text = f"{sil:.3f}" if sil is not None else "N/A"
         parts += [
             '<div class="stat-row" style="margin-top:12px;">',
@@ -631,7 +766,7 @@ class Reporter:
             (f'<div class="stat-box"><div class="stat-val">{db_text}</div>'
              f'<div class="stat-lbl">Davies-Bouldin Index ↓</div></div>'),
             (f'<div class="stat-box"><div class="stat-val">{n_cls}</div>'
-             f'<div class="stat-lbl">클래스 수</div></div>'),
+             f'<div class="stat-lbl">{self._t("n_classes_lbl")}</div></div>'),
             '</div>',
         ]
         if interp:
@@ -642,17 +777,14 @@ class Reporter:
             )
         return parts
 
+    # ---- Vegetation separation card ──────────────────────────────
+
     def _render_veg_separation_card(
         self,
         veg_sep: Optional[Dict[str, Any]],
     ) -> str:
-        """
-        Render the vegetation separation section:
-          - NDVI-based detection accuracy (Recall / Precision / F1) as progress bars
-          - Leaf ↔ Other class spectral distance bar chart
-        """
         if not veg_sep:
-            return '<p style="color:#999;">식생 분리도 데이터가 없습니다.</p>'
+            return f'<p style="color:#999;">{self._t("no_veg_data")}</p>'
 
         note = veg_sep.get("note")
         if note:
@@ -661,33 +793,33 @@ class Reporter:
         try:
             import plotly.graph_objects as go
         except ImportError:
-            return '<p><em>pip install plotly 후 표시됩니다.</em></p>'
+            return f'<p><em>{self._t("install_plotly")}</em></p>'
 
         parts = []
 
-        leaf_names     = veg_sep.get("leaf_names", [])
-        recall         = veg_sep.get("ndvi_recall")
-        precision      = veg_sep.get("ndvi_precision")
-        f1             = veg_sep.get("ndvi_f1")
-        ndvi_gt_px     = veg_sep.get("ndvi_gt_pixels", 0)
-        leaf_pred_px   = veg_sep.get("leaf_pred_pixels", 0)
-        bars           = veg_sep.get("separation_bars", [])
-        min_sep        = veg_sep.get("min_separation")
-        mean_sep       = veg_sep.get("mean_separation")
+        leaf_names   = veg_sep.get("leaf_names", [])
+        recall       = veg_sep.get("ndvi_recall")
+        precision    = veg_sep.get("ndvi_precision")
+        f1           = veg_sep.get("ndvi_f1")
+        ndvi_gt_px   = veg_sep.get("ndvi_gt_pixels", 0)
+        leaf_pred_px = veg_sep.get("leaf_pred_pixels", 0)
+        bars         = veg_sep.get("separation_bars", [])
+        min_sep      = veg_sep.get("min_separation")
+        mean_sep     = veg_sep.get("mean_separation")
 
-        # ── 감지된 잎 클래스 표시 ──────────────────────────────
+        # ── Detected leaf classes ──────────────────────────────────
         leaf_badge = ", ".join(
             f'<span class="badge" style="background:#2e7d62;padding:3px 10px;">'
             f'{n}</span>' for n in leaf_names
-        ) or '<em>감지 못 함</em>'
+        ) or f'<em>{self._t("none_detected")}</em>'
         parts.append(
             f'<p style="margin-bottom:14px;font-size:13px;">'
-            f'<strong>감지된 잎 클래스:</strong> {leaf_badge}</p>'
+            f'<strong>{self._t("detected_leaf")}:</strong> {leaf_badge}</p>'
         )
 
-        # ── NDVI 기반 정확도 (Recall / Precision / F1) ─────────
+        # ── NDVI-based accuracy (Recall / Precision / F1) ──────────
         if recall is not None:
-            def _pct_bar(val: float, color: str, label: str) -> str:
+            def _pct_bar(val: float, label: str, sub: str) -> str:
                 pct   = round(val * 100, 1)
                 width = max(2, round(pct))
                 if pct >= 85:   c = "#27ae60"
@@ -702,49 +834,41 @@ class Reporter:
                     f'margin:6px 0 4px;">'
                     f'<div style="background:{c};width:{width}%;height:8px;'
                     f'border-radius:4px;"></div></div>'
-                    f'<div class="stat-lbl">{label}</div>'
+                    f'<div class="stat-lbl">{label}<br><small>{sub}</small></div>'
                     f'</div>'
                 )
 
             parts += [
-                '<p style="font-size:12px;color:#555;margin-bottom:8px;">'
-                '▶ NDVI &gt; 0.15 픽셀을 식생 기준(Ground Truth)으로 사용</p>',
+                f'<p style="font-size:12px;color:#555;margin-bottom:8px;">'
+                f'{self._t("ndvi_gt_note")}</p>',
                 '<div class="stat-row">',
-                _pct_bar(recall,    "#27ae60", f"검출률 (Recall)<br>"
-                         f"<small>GT 식생 {ndvi_gt_px:,}px 중 검출</small>"),
-                _pct_bar(precision, "#2980b9", f"정밀도 (Precision)<br>"
-                         f"<small>예측 잎 {leaf_pred_px:,}px 중 정확</small>"),
-                _pct_bar(f1,        "#8e44ad", "F1 점수<br>"
-                         "<small>Recall × Precision 조화평균</small>"),
+                _pct_bar(recall,    self._t("recall_lbl"),
+                         self._t("recall_sub",    gt_px=ndvi_gt_px)),
+                _pct_bar(precision, self._t("precision_lbl"),
+                         self._t("precision_sub", leaf_px=leaf_pred_px)),
+                _pct_bar(f1,        self._t("f1_lbl"),
+                         self._t("f1_sub")),
                 '</div>',
             ]
         else:
             parts.append(
-                '<p style="color:#aaa;font-size:12px;">'
-                'NIR/Red 밴드 정보가 없어 NDVI 정확도를 계산하지 못했습니다.</p>'
+                f'<p style="color:#aaa;font-size:12px;">{self._t("no_ndvi")}</p>'
             )
 
-        # ── 잎 ↔ 비잎 스펙트럼 거리 바 차트 ───────────────────
+        # ── Leaf ↔ non-leaf spectral distance bar chart ────────────
         if bars:
             parts.append(
-                '<p style="font-size:12px;color:#555;margin:18px 0 6px;">'
-                '▶ 잎 클래스 ↔ 비잎 클래스 간 평균 스펙트럼 거리'
-                ' — 값이 클수록 잘 분리됩니다.</p>'
+                f'<p style="font-size:12px;color:#555;margin:18px 0 6px;">'
+                f'{self._t("sep_dist_caption")}</p>'
             )
 
             labels    = [b["label"]    for b in bars]
             distances = [b["distance"] for b in bars]
-            # colour: green if above mean, orange if below
-            mean_d = float(np.mean(distances)) if distances else 0
-            colors  = [
-                "#27ae60" if d >= mean_d else "#f39c12"
-                for d in distances
-            ]
+            mean_d    = float(np.mean(distances)) if distances else 0
+            colors    = ["#27ae60" if d >= mean_d else "#f39c12" for d in distances]
 
             fig_bar = go.Figure(go.Bar(
-                x=distances,
-                y=labels,
-                orientation="h",
+                x=distances, y=labels, orientation="h",
                 marker_color=colors,
                 text=[f"{d:.4f}" for d in distances],
                 textposition="outside",
@@ -752,14 +876,14 @@ class Reporter:
             ))
             fig_bar.add_vline(
                 x=mean_d, line_dash="dot", line_color="#888",
-                annotation_text=f"평균 {mean_d:.4f}",
+                annotation_text=self._t("sep_dist_mean", mean=mean_d),
                 annotation_position="top right",
                 annotation_font_size=11,
             )
             fig_bar.update_layout(
                 height=max(200, 40 * len(bars) + 80),
                 margin=dict(l=10, r=80, t=20, b=30),
-                xaxis_title="스펙트럼 유클리드 거리",
+                xaxis_title=self._t("sep_dist_xaxis"),
                 yaxis=dict(autorange="reversed"),
                 plot_bgcolor="#fafafa",
                 paper_bgcolor="#ffffff",
@@ -767,15 +891,14 @@ class Reporter:
             )
             parts.append(fig_bar.to_html(full_html=False, include_plotlyjs=False))
 
-            # min / mean stat boxes
             parts += [
                 '<div class="stat-row" style="margin-top:10px;">',
                 (f'<div class="stat-box"><div class="stat-val">'
                  f'{min_sep:.4f}</div>'
-                 f'<div class="stat-lbl">최소 분리 거리 (가장 가까운 쌍)</div></div>'),
+                 f'<div class="stat-lbl">{self._t("min_sep")}</div></div>'),
                 (f'<div class="stat-box"><div class="stat-val">'
                  f'{mean_sep:.4f}</div>'
-                 f'<div class="stat-lbl">평균 분리 거리</div></div>'),
+                 f'<div class="stat-lbl">{self._t("mean_sep")}</div></div>'),
                 '</div>',
             ]
 
@@ -789,31 +912,27 @@ class Reporter:
         try:
             import plotly.graph_objects as go
         except ImportError:
-            return "<p><em>pip install plotly 후 분리도 히트맵이 표시됩니다.</em></p>"
+            return f"<p><em>{self._t('heatmap_caption')}</em></p>"
 
         names  = sep["names"]
         matrix = sep["matrix"]
-
         z    = np.round(matrix, 4).tolist()
         text = [[f"{v:.3f}" for v in row] for row in z]
 
         fig = go.Figure(data=go.Heatmap(
-            z=z,
-            x=names,
-            y=names,
-            text=text,
-            texttemplate="%{text}",
+            z=z, x=names, y=names,
+            text=text, texttemplate="%{text}",
             textfont=dict(size=11),
             colorscale="Viridis",
-            colorbar=dict(title="거리"),
+            colorbar=dict(title=self._t("dist_label")),
         ))
         fig.update_layout(
             title=dict(
-                text="스펙트럼 분리도 행렬 (클래스 평균 스펙트럼 간 유클리드 거리)",
+                text=self._t("sep_matrix_title"),
                 font=dict(size=13),
             ),
-            xaxis_title="클래스",
-            yaxis_title="클래스",
+            xaxis_title=self._t("axis_class"),
+            yaxis_title=self._t("axis_class"),
             height=max(320, 60 * len(names) + 120),
             margin=dict(l=120, r=20, t=60, b=80),
             plot_bgcolor="#fafafa",
@@ -825,7 +944,6 @@ class Reporter:
     # Plotly spectral chart
     # ---------------------------------------------------------- #
 
-    # Dash patterns cycled across classes for visual distinction
     _DASH_STYLES = [
         "solid", "dash", "dot", "dashdot", "longdash", "longdashdot",
     ]
@@ -838,7 +956,7 @@ class Reporter:
         try:
             import plotly.graph_objects as go
         except ImportError:
-            return "<p><em>pip install plotly 후 차트가 표시됩니다.</em></p>"
+            return f"<p><em>{self._t('no_chart')}</em></p>"
 
         show_std = self.rcfg.get("spectra_show_std", True)
         fig = go.Figure()
@@ -852,13 +970,11 @@ class Reporter:
             mean  = s["mean"].tolist()
             std   = s["std"].tolist()
 
-            # Mean line – class colour + unique dash pattern
             fig.add_trace(go.Scatter(
                 x=wl, y=mean, name=name, mode="lines",
                 line=dict(color=color_rgb, width=2.5, dash=dash),
             ))
 
-            # ±1 std shaded envelope
             if show_std:
                 upper = [m + s_ for m, s_ in zip(mean, std)]
                 lower = [m - s_ for m, s_ in zip(mean, std)]
@@ -873,10 +989,10 @@ class Reporter:
                     hoverinfo="skip",
                 ))
 
-        x_label = "파장 (nm)" if wavelengths else "밴드 인덱스"
+        x_label = self._t("wavelength_nm") if wavelengths else self._t("band_index")
         fig.update_layout(
             xaxis_title=x_label,
-            yaxis_title="반사율",
+            yaxis_title=self._t("reflectance"),
             legend=dict(
                 orientation="h", yanchor="bottom", y=1.02,
                 xanchor="right", x=1,
