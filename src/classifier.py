@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 classifier.py
 -------------
@@ -488,13 +489,17 @@ class HyperspectralClassifier:
         logger.info(f"  PCA explained variance: {100*explained:.1f}%")
 
         # Try sklearn >= 1.3 first, then fall back to hdbscan package
+        import warnings
         try:
             from sklearn.cluster import HDBSCAN as _HDBSCAN
             hdb = _HDBSCAN(
                 min_cluster_size=min_cluster_size,
                 min_samples=min_samples,
+                copy=True,  # suppress FutureWarning in sklearn>=1.10
             )
-            labels = hdb.fit_predict(flat_pca)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                labels = hdb.fit_predict(flat_pca)
         except ImportError:
             try:
                 import hdbscan as _hdbscan_pkg
@@ -502,7 +507,9 @@ class HyperspectralClassifier:
                     min_cluster_size=min_cluster_size,
                     min_samples=min_samples,
                 )
-                labels = hdb.fit_predict(flat_pca)
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    labels = hdb.fit_predict(flat_pca)
             except ImportError:
                 raise ImportError(
                     "HDBSCAN requires scikit-learn >= 1.3  or  the 'hdbscan' package.\n"
@@ -579,6 +586,7 @@ class HyperspectralClassifier:
         1-indexed.  Data must be non-negative — reflectance values
         after normalization are already in [0, 1].
         """
+        import warnings
         from sklearn.decomposition import NMF
 
         cfg = self.cfg.get("nmf", {})
@@ -587,28 +595,27 @@ class HyperspectralClassifier:
         max_iter     = int(cfg.get("max_iter", 500))
         random_state = int(cfg.get("random_state", 42))
 
-        flat = data.reshape(-1, B).astype(np.float64)
+        flat = data.reshape(-1, int(B)).astype(np.float64)
 
         # NMF requires non-negative input; clip for safety
         flat = np.clip(flat, 0.0, None)
 
-        logger.info(
-            f"  NMF: {n_components} components, max_iter={max_iter}"
-        )
+        logger.info(f"  NMF: {n_components} components, max_iter={max_iter}")
         nmf = NMF(
             n_components=n_components,
             max_iter=max_iter,
             random_state=random_state,
         )
-        # W: (N_pixels, n_components)  —  activation / abundance matrix
-        W = nmf.fit_transform(flat)
-        logger.info(
-            f"  NMF reconstruction error: {nmf.reconstruction_err_:.4f}"
-        )
+        # W_mat: (N_pixels, n_components) — activation / abundance matrix
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")   # suppress ConvergenceWarning
+            W_mat = nmf.fit_transform(flat)
 
-        # Hard assignment: pixel → component with highest abundance
-        labels = np.argmax(W, axis=1)
-        class_map = labels.reshape(H, W) + 1  # 1-indexed
+        logger.info(f"  NMF reconstruction error: {nmf.reconstruction_err_:.4f}")
+
+        # Hard assignment: pixel -> component with highest abundance
+        labels = np.argmax(W_mat, axis=1)
+        class_map = labels.reshape(int(H), int(W)) + 1  # 1-indexed
         return class_map
 
     # ============================================================
