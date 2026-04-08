@@ -652,6 +652,7 @@ with tab_run:
         import time as _time
         pipeline_ok  = False
         _elapsed_sec = 0.0
+        _t_wall      = _time.time()   # wall-clock start for file mtime filtering
         try:
             with st.spinner("⏳ Analysing…  (may take several minutes for large images)"):
                 from src.pipeline import Pipeline
@@ -698,8 +699,11 @@ with tab_run:
                         f"Open the file directly in your browser to view it."
                     )
 
-            # Class-map previews
-            class_maps = sorted(out_p.rglob("class_map.png"))
+            # Class-map previews — only files created/updated in this run
+            class_maps = sorted(
+                p for p in out_p.rglob("class_map.png")
+                if p.stat().st_mtime >= _t_wall
+            )
             if class_maps:
                 st.markdown("### 🗺️ Classification Map Preview")
                 n_cols = min(len(class_maps), 3)

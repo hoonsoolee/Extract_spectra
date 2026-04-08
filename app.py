@@ -654,6 +654,7 @@ with tab_run:
         import time as _time
         pipeline_ok  = False
         _elapsed_sec = 0.0
+        _t_wall      = _time.time()   # wall-clock start for file mtime filtering
         try:
             with st.spinner("⏳ 분석 중...  (데이터 크기에 따라 수 분이 걸릴 수 있습니다)"):
                 from src.pipeline import Pipeline
@@ -700,8 +701,11 @@ with tab_run:
                         f"브라우저에서 직접 파일을 열어 확인하세요."
                     )
 
-            # Class-map previews
-            class_maps = sorted(out_p.rglob("class_map.png"))
+            # Class-map previews — only files created/updated in this run
+            class_maps = sorted(
+                p for p in out_p.rglob("class_map.png")
+                if p.stat().st_mtime >= _t_wall
+            )
             if class_maps:
                 st.markdown("### 🗺️ 분류 맵 미리보기")
                 n_cols = min(len(class_maps), 3)
