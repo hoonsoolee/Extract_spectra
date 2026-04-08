@@ -417,6 +417,9 @@ pre code { background: none; color: inherit; padding: 0; }
       <li><a href="#s5-kmeans">5.2 K-Means</a></li>
       <li><a href="#s5-sam">5.3 SAM</a></li>
       <li><a href="#s5-ae">5.4 Autoencoder</a></li>
+      <li><a href="#s5-hdbscan">5.5 HDBSCAN</a></li>
+      <li><a href="#s5-gmm">5.6 GMM</a></li>
+      <li><a href="#s5-nmf">5.7 NMF</a></li>
     </ul></li>
     <li><a href="#s6">6. Number of Classes</a></li>
     <li><a href="#s7">7. Output Settings</a></li>
@@ -703,7 +706,7 @@ cd Extract_spectra</pre>
     </div>
   </div>
 
-  <p>All four methods are <strong>fully unsupervised</strong> — they discover natural spectral groupings automatically. Choose based on your image type and analysis goal.</p>
+  <p>All seven methods are <strong>fully unsupervised</strong> — they discover natural spectral groupings automatically. Choose based on your image type and analysis goal.</p>
 
   <div class="method-grid">
     <div class="method-card">
@@ -725,6 +728,21 @@ cd Extract_spectra</pre>
       <span class="mc-tag tag-dl">Deep Learning</span>
       <h4>Autoencoder</h4>
       <p>Neural network learns compressed spectral features, then clusters them. Requires PyTorch. Slowest but most flexible.</p>
+    </div>
+    <div class="method-card">
+      <span class="mc-tag tag-general">Auto Cluster Count</span>
+      <h4>HDBSCAN</h4>
+      <p>Density-based hierarchical clustering. Determines the number of clusters automatically. No need to set a class count.</p>
+    </div>
+    <div class="method-card">
+      <span class="mc-tag tag-general">Probabilistic</span>
+      <h4>GMM — Gaussian Mixture Model</h4>
+      <p>Soft probabilistic clustering. Models each class as a Gaussian distribution. Good when clusters have different shapes and sizes.</p>
+    </div>
+    <div class="method-card">
+      <span class="mc-tag tag-general">Spectral Unmixing</span>
+      <h4>NMF — Non-negative Matrix Factorization</h4>
+      <p>Decomposes spectra into pure endmember components. Each pixel is assigned to its dominant endmember. No negative values needed.</p>
     </div>
   </div>
 
@@ -923,6 +941,128 @@ cd Extract_spectra</pre>
       <strong>PyTorch Required</strong>
       The Autoencoder method requires PyTorch. Install it with: <code>pip install torch</code><br>
       If PyTorch is not installed, selecting Autoencoder will cause an error when you click Run.
+    </div>
+  </div>
+
+  <!-- ── 5.5 HDBSCAN ── -->
+  <h3 id="s5-hdbscan">5.5 HDBSCAN — Hierarchical Density-Based Clustering</h3>
+
+  <p>HDBSCAN (Hierarchical Density-Based Spatial Clustering of Applications with Noise) finds clusters of arbitrary shape by grouping pixels that are densely packed together in the PCA-reduced spectral space. Unlike K-Means or GMM, it does <strong>not</strong> require you to specify the number of clusters in advance — the algorithm discovers it from the data.</p>
+
+  <h4>How it works</h4>
+  <ol class="steps">
+    <li><p><strong>PCA reduction:</strong> Spectra are reduced to 15 principal components to speed up density estimation.</p></li>
+    <li><p><strong>Density estimation:</strong> HDBSCAN builds a hierarchy of clusters by linking dense regions at progressively lower density thresholds.</p></li>
+    <li><p><strong>Noise rejection:</strong> Pixels in sparse regions are labelled as noise (HDBSCAN label = −1) and mapped to <em>class 0 (Background)</em> in the output.</p></li>
+  </ol>
+
+  <h4>Parameters</h4>
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th>Parameter</th><th>Default</th><th>What it controls</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="param-name">min_cluster_size</td>
+        <td><span class="param-default">50</span></td>
+        <td>Minimum number of pixels required to form a cluster. Increase for larger, broader clusters; decrease to detect smaller detail classes. For megapixel images, values of 200–1000 are common.</td>
+      </tr>
+      <tr>
+        <td class="param-name">min_samples</td>
+        <td><span class="param-default">5</span></td>
+        <td>Controls how conservative the clustering is. Higher values increase the number of noise pixels (class 0). Lower values are more permissive.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout tip">
+    <div class="callout-icon">&#x1F4A1;</div>
+    <div class="callout-body">
+      <strong>When to use HDBSCAN</strong>
+      Use HDBSCAN when you have no idea how many distinct material classes are present in the image, or when class boundaries are irregular. If the result contains too many noise pixels (class 0), lower <code>min_samples</code>. If too many small spurious clusters appear, raise <code>min_cluster_size</code>.
+    </div>
+  </div>
+
+  <!-- ── 5.6 GMM ── -->
+  <h3 id="s5-gmm">5.6 GMM — Gaussian Mixture Model</h3>
+
+  <p>GMM models the spectral distribution of the image as a mixture of Gaussian probability distributions. Each pixel is assigned to the component (class) for which it has the highest posterior probability. Unlike K-Means, which assumes spherical equal-size clusters, GMM can model clusters of different shapes and sizes by learning full covariance matrices.</p>
+
+  <h4>How it works</h4>
+  <ol class="steps">
+    <li><p><strong>PCA reduction:</strong> Spectra are reduced to 15 principal components (same as K-Means).</p></li>
+    <li><p><strong>EM fitting:</strong> The Expectation-Maximisation algorithm iteratively estimates the mean, covariance and weight of each Gaussian component.</p></li>
+    <li><p><strong>Hard assignment:</strong> Each pixel is assigned to the component with the highest posterior probability.</p></li>
+  </ol>
+
+  <h4>Parameters</h4>
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th>Parameter</th><th>Default</th><th>What it controls</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="param-name">Number of Classes</td>
+        <td><span class="param-default">6</span></td>
+        <td>Number of Gaussian components. Set via the Number of Classes slider. Same guidance as K-Means applies.</td>
+      </tr>
+      <tr>
+        <td class="param-name">covariance_type</td>
+        <td><span class="param-default">full</span></td>
+        <td>Shape of the covariance matrix per component. <code>full</code> is most expressive but slowest; <code>diag</code> or <code>tied</code> are faster for very large datasets.</td>
+      </tr>
+      <tr>
+        <td class="param-name">max_iter</td>
+        <td><span class="param-default">100</span></td>
+        <td>Maximum EM iterations. Increase if the algorithm does not converge (check the log for convergence warnings).</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout tip">
+    <div class="callout-icon">&#x1F4A1;</div>
+    <div class="callout-body">
+      <strong>When to use GMM</strong>
+      GMM is a good alternative to K-Means when you expect classes with elongated or differently-sized spectral distributions — for example, a wide soil-moisture gradient or spectrally overlapping crop varieties.
+    </div>
+  </div>
+
+  <!-- ── 5.7 NMF ── -->
+  <h3 id="s5-nmf">5.7 NMF — Non-negative Matrix Factorization (Spectral Unmixing)</h3>
+
+  <p>NMF decomposes the hyperspectral data cube into a set of <em>endmember spectra</em> (pure spectral signatures) and their corresponding <em>abundance maps</em> (how much of each endmember is present at each pixel). Because reflectance values are always non-negative, NMF is a natural fit for hyperspectral data. Each pixel is hard-assigned to its dominant endmember for visualisation.</p>
+
+  <h4>How it works</h4>
+  <ol class="steps">
+    <li><p><strong>Factorization:</strong> NMF solves: <em>Data ≈ W × H</em>, where W (pixels × components) gives the abundance coefficients and H (components × bands) gives the endmember spectra.</p></li>
+    <li><p><strong>Hard assignment:</strong> Each pixel is assigned to the component (endmember) with the highest abundance value in W.</p></li>
+    <li><p><strong>Endmembers:</strong> The rows of H represent the extracted pure spectral signatures — these can be inspected in the HTML report.</p></li>
+  </ol>
+
+  <h4>Parameters</h4>
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th>Parameter</th><th>Default</th><th>What it controls</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="param-name">Number of Classes</td>
+        <td><span class="param-default">6</span></td>
+        <td>Number of endmember components to extract. Set via the Number of Classes slider.</td>
+      </tr>
+      <tr>
+        <td class="param-name">max_iter</td>
+        <td><span class="param-default">500</span></td>
+        <td>Maximum NMF iterations. Increase if the reconstruction error is still decreasing at convergence (check the log output).</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout tip">
+    <div class="callout-icon">&#x1F4A1;</div>
+    <div class="callout-body">
+      <strong>When to use NMF</strong>
+      NMF is best suited for spectral unmixing tasks where you believe each pixel may be a physical mixture of a few pure materials (e.g. soil + leaf litter + vegetation). The extracted endmember spectra in the report can be compared against spectral libraries for material identification.
     </div>
   </div>
 </div>

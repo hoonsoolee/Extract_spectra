@@ -100,6 +100,33 @@ METHODS = {
             "라벨 CSV + PyTorch 필요."
         ),
     },
+    "hdbscan": {
+        "label":  "🔵 HDBSCAN  (밀도 기반 클러스터링)",
+        "kind":   "비지도",
+        "help":   (
+            "계층적 밀도 기반 클러스터링 — **클러스터 수를 지정할 필요가 없습니다**.  \n"
+            "알고리즘이 자동으로 클러스터 수를 결정합니다.  \n"
+            "노이즈 픽셀은 Background(class 0)에 할당됩니다."
+        ),
+    },
+    "gmm": {
+        "label":  "📈 GMM  (가우시안 혼합 모델)",
+        "kind":   "비지도",
+        "help":   (
+            "가우시안 혼합 모델을 이용한 확률적 소프트 클러스터링.  \n"
+            "PCA 전처리(15 컴포넌트) 후 GMM 피팅.  \n"
+            "클래스 수 슬라이더로 컴포넌트 수를 설정합니다."
+        ),
+    },
+    "nmf": {
+        "label":  "🧩 NMF  (스펙트럼 언믹싱)",
+        "kind":   "비지도",
+        "help":   (
+            "비음수 행렬 분해 — 스펙트럼을 엔드멤버와 풍도 맵으로 분해합니다.  \n"
+            "각 픽셀은 풍도가 가장 높은 엔드멤버 컴포넌트에 할당됩니다.  \n"
+            "반사율 데이터는 이미 비음수이므로 전처리 불필요."
+        ),
+    },
 }
 
 KIND_COLOR = {"비지도": "🟢", "지도": "🔵", "비지도 / 지도": "🟡"}
@@ -366,6 +393,12 @@ with st.sidebar:
     if method == "supervised":
         st.caption("라벨 CSV의 클래스 수를 자동으로 사용합니다.")
         n_classes = 0
+    elif method == "hdbscan":
+        st.caption(
+            "HDBSCAN은 클러스터 수를 **자동으로** 결정합니다. "
+            "슬라이더는 이 방법에서 무시됩니다."
+        )
+        n_classes = 0
     else:
         n_classes = st.slider(
             "클러스터(클래스) 수",
@@ -411,6 +444,25 @@ with st.sidebar:
     if method == "cnn":
         with st.expander("CNN 설정", expanded=False):
             cnn_epochs = st.slider("학습 epochs", 10, 200, 100, 10)
+
+    hdbscan_min_cluster_size = 50
+    hdbscan_min_samples      = 5
+    if method == "hdbscan":
+        with st.expander("HDBSCAN 설정", expanded=True):
+            hdbscan_min_cluster_size = st.slider(
+                "min_cluster_size", 10, 500, 50, 10,
+                help=(
+                    "클러스터 형성에 필요한 최소 픽셀 수. "
+                    "값이 클수록 더 크고 적은 클러스터가 생성됩니다."
+                ),
+            )
+            hdbscan_min_samples = st.slider(
+                "min_samples", 1, 50, 5, 1,
+                help=(
+                    "클러스터링 보수성 제어. "
+                    "값이 클수록 노이즈 픽셀(class 0)이 늘어납니다."
+                ),
+            )
 
     labels_csv = ""
     if needs_labels or method == "sam":
@@ -460,7 +512,10 @@ with tab_run:
     with col_left:
         src_info   = f"`{local_folder}`" if data_src == "로컬 폴더" else f"`{github_repo}`"
         limit_info = str(int(file_limit)) + " 파일" if file_limit else "전체"
-        cls_info   = f"{n_classes} 클래스" if n_classes else "라벨 CSV 기준"
+        if method == "hdbscan":
+            cls_info = "자동 결정 (HDBSCAN)"
+        else:
+            cls_info = f"{n_classes} 클래스" if n_classes else "라벨 CSV 기준"
         st.info(
             f"**방법:** {METHODS[method]['label']}  \n"
             f"**데이터:** {src_info}  \n"
@@ -552,6 +607,23 @@ with tab_run:
                     "learning_rate": 0.001,
                     "test_split":    0.2,
                     "patience":      15,
+                },
+                "hdbscan": {
+                    "min_cluster_size": hdbscan_min_cluster_size,
+                    "min_samples":      hdbscan_min_samples,
+                    "pca_components":   15,
+                },
+                "gmm": {
+                    "n_components":    n_classes or 6,
+                    "covariance_type": "full",
+                    "max_iter":        100,
+                    "pca_components":  15,
+                    "random_state":    42,
+                },
+                "nmf": {
+                    "n_components": n_classes or 6,
+                    "max_iter":     500,
+                    "random_state": 42,
                 },
             },
             "output": {

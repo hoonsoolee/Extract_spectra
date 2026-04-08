@@ -14,6 +14,9 @@ pandas>=1.4.0
 tqdm>=4.62.0
 Pillow>=9.0.0
 
+# HDBSCAN (sklearn>=1.3 already provides it; install this only for older sklearn)
+hdbscan>=0.8.33
+
 # Deep learning (autoencoder / 1D-CNN methods)
 # CPU-only (~250 MB):  pip install torch --index-url https://download.pytorch.org/whl/cpu
 # CUDA GPU:            pip install torch --index-url https://download.pytorch.org/whl/cu121

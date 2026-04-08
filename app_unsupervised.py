@@ -77,6 +77,30 @@ METHODS = {
             "Requires PyTorch · no labels needed."
         ),
     },
+    "hdbscan": {
+        "label": "🔵 HDBSCAN  (Density-Based)",
+        "help": (
+            "Hierarchical density-based clustering — **no need to set cluster count**.  \n"
+            "The algorithm finds the number of clusters automatically.  \n"
+            "Noise pixels are assigned to Background (class 0)."
+        ),
+    },
+    "gmm": {
+        "label": "📈 GMM  (Gaussian Mixture Model)",
+        "help": (
+            "Probabilistic soft clustering via Gaussian Mixture Model.  \n"
+            "PCA preprocessing (15 components) then GMM fitting.  \n"
+            "Use the **Number of Classes** slider to set components."
+        ),
+    },
+    "nmf": {
+        "label": "🧩 NMF  (Spectral Unmixing)",
+        "help": (
+            "Non-negative Matrix Factorization — decomposes spectra into  \n"
+            "endmember components and abundance maps.  \n"
+            "Each pixel is assigned to its dominant endmember component."
+        ),
+    },
 }
 
 # ============================================================
@@ -204,11 +228,18 @@ with st.sidebar:
 
     # ── Number of classes ────────────────────────────────────
     st.markdown("### 🔢 Number of Classes")
-    n_classes = st.slider(
-        "Clusters / Classes",
-        min_value=2, max_value=20, value=6,
-        label_visibility="collapsed",
-    )
+    if method == "hdbscan":
+        st.caption(
+            "HDBSCAN determines the number of clusters **automatically**. "
+            "The slider is ignored for this method."
+        )
+        n_classes = 6  # placeholder; not used by hdbscan
+    else:
+        n_classes = st.slider(
+            "Clusters / Classes",
+            min_value=2, max_value=20, value=6,
+            label_visibility="collapsed",
+        )
 
     st.markdown("---")
 
@@ -240,6 +271,25 @@ with st.sidebar:
     if method == "autoencoder":
         with st.expander("Autoencoder Settings", expanded=False):
             ae_epochs = st.slider("Training epochs", 10, 200, 60, 10)
+
+    hdbscan_min_cluster_size = 50
+    hdbscan_min_samples      = 5
+    if method == "hdbscan":
+        with st.expander("HDBSCAN Settings", expanded=True):
+            hdbscan_min_cluster_size = st.slider(
+                "min_cluster_size", 10, 500, 50, 10,
+                help=(
+                    "Minimum number of pixels to form a cluster. "
+                    "Larger values → fewer, larger clusters."
+                ),
+            )
+            hdbscan_min_samples = st.slider(
+                "min_samples", 1, 50, 5, 1,
+                help=(
+                    "Controls clustering conservatism. "
+                    "Higher values → more noise pixels (class 0)."
+                ),
+            )
 
     st.markdown("---")
 
@@ -351,6 +401,23 @@ if run_btn:
                 "learning_rate": 0.001,
                 "max_pixels":    100_000,
             },
+            "hdbscan": {
+                "min_cluster_size": hdbscan_min_cluster_size,
+                "min_samples":      hdbscan_min_samples,
+                "pca_components":   15,
+            },
+            "gmm": {
+                "n_components":    n_classes,
+                "covariance_type": "full",
+                "max_iter":        100,
+                "pca_components":  15,
+                "random_state":    42,
+            },
+            "nmf": {
+                "n_components": n_classes,
+                "max_iter":     500,
+                "random_state": 42,
+            },
         },
         "output": {
             "dir":                     output_dir,
@@ -444,5 +511,5 @@ if run_btn:
 st.markdown("---")
 st.caption(
     "HyperspectralPipeline · Unsupervised Edition · "
-    "Methods: hybrid | kmeans | sam | autoencoder"
+    "Methods: hybrid | kmeans | sam | autoencoder | hdbscan | gmm | nmf"
 )

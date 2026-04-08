@@ -279,6 +279,9 @@ pre code { background: none; color: inherit; padding: 0; }
       <li><a href="#s5-kmeans">5.2 K-Means</a></li>
       <li><a href="#s5-sam">5.3 SAM</a></li>
       <li><a href="#s5-ae">5.4 Autoencoder</a></li>
+      <li><a href="#s5-hdbscan">5.5 HDBSCAN</a></li>
+      <li><a href="#s5-gmm">5.6 GMM</a></li>
+      <li><a href="#s5-nmf">5.7 NMF</a></li>
     </ul></li>
     <li><a href="#s6">6. 클래스 수</a></li>
     <li><a href="#s7">7. 출력 설정</a></li>
@@ -564,7 +567,7 @@ cd Extract_spectra</pre>
     </div>
   </div>
 
-  <p>4가지 방법 모두 <strong>완전 비지도학습</strong>입니다. 라벨 없이 데이터의 자연적인 스펙트럼 구조를 자동으로 찾아냅니다. 이미지 특성과 목적에 따라 선택하세요.</p>
+  <p>7가지 방법 모두 <strong>완전 비지도학습</strong>입니다. 라벨 없이 데이터의 자연적인 스펙트럼 구조를 자동으로 찾아냅니다. 이미지 특성과 목적에 따라 선택하세요.</p>
 
   <div class="method-grid">
     <div class="method-card">
@@ -586,6 +589,21 @@ cd Extract_spectra</pre>
       <span class="mc-tag tag-dl">딥러닝</span>
       <h4>Autoencoder</h4>
       <p>신경망으로 스펙트럼을 압축한 후 클러스터링. PCA가 놓치는 비선형 패턴 포착. PyTorch 필요.</p>
+    </div>
+    <div class="method-card">
+      <span class="mc-tag tag-general">자동 클러스터 수</span>
+      <h4>HDBSCAN</h4>
+      <p>밀도 기반 계층적 클러스터링. 클러스터 수를 자동으로 결정합니다. 클래스 수 설정 불필요.</p>
+    </div>
+    <div class="method-card">
+      <span class="mc-tag tag-general">확률적</span>
+      <h4>GMM — 가우시안 혼합 모델</h4>
+      <p>소프트 확률적 클러스터링. 다양한 형태와 크기의 클래스를 모델링. K-Means보다 유연함.</p>
+    </div>
+    <div class="method-card">
+      <span class="mc-tag tag-general">스펙트럼 언믹싱</span>
+      <h4>NMF — 비음수 행렬 분해</h4>
+      <p>스펙트럼을 순수 엔드멤버와 풍도 맵으로 분해. 각 픽셀은 가장 풍도가 높은 엔드멤버에 할당.</p>
     </div>
   </div>
 
@@ -789,6 +807,132 @@ cd Extract_spectra</pre>
       Autoencoder 방법은 PyTorch가 설치되어 있어야 합니다:<br>
       <code>pip install torch</code><br>
       설치되어 있지 않으면 분석 시작 시 오류가 발생합니다.
+    </div>
+  </div>
+
+  <!-- 5.5 HDBSCAN -->
+  <h3 id="s5-hdbscan">5.5 HDBSCAN — 계층적 밀도 기반 클러스터링</h3>
+
+  <p>HDBSCAN(Hierarchical Density-Based Spatial Clustering of Applications with Noise)은 PCA로 축소된 스펙트럼 공간에서 밀도가 높은 픽셀들을 그룹화합니다. K-Means나 GMM과 달리 클러스터 수를 사전에 지정할 필요가 없으며, 알고리즘이 데이터에서 자동으로 결정합니다.</p>
+
+  <h4>동작 원리</h4>
+  <ol class="steps">
+    <li><p><strong>PCA 축소:</strong> 스펙트럼을 15개 주성분으로 축소하여 밀도 추정을 빠르게 수행합니다.</p></li>
+    <li><p><strong>밀도 추정:</strong> HDBSCAN이 밀도가 높은 구역을 계층적으로 연결하여 클러스터 계층을 형성합니다.</p></li>
+    <li><p><strong>노이즈 처리:</strong> 희박한 구역의 픽셀은 노이즈(HDBSCAN 레이블 = −1)로 판정되어 출력에서 <em>class 0 (Background)</em>에 할당됩니다.</p></li>
+  </ol>
+
+  <h4>파라미터</h4>
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th>파라미터</th><th>기본값</th><th>역할</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="param-name">min_cluster_size</td>
+        <td><span class="param-default">50</span></td>
+        <td>클러스터 형성에 필요한 최소 픽셀 수. 값이 클수록 크고 적은 클러스터가 생성됩니다. 수백만 픽셀 이미지에서는 200~1000 범위가 일반적입니다.</td>
+      </tr>
+      <tr>
+        <td class="param-name">min_samples</td>
+        <td><span class="param-default">5</span></td>
+        <td>클러스터링의 보수성을 제어합니다. 값이 클수록 노이즈 픽셀(class 0)이 늘어납니다.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout tip">
+    <div class="callout-icon">&#x1F4A1;</div>
+    <div class="callout-body">
+      <strong>HDBSCAN 사용 시기</strong>
+      이미지에 몇 개의 클래스가 있는지 알 수 없거나 클래스 경계가 불규칙할 때 사용하세요.
+      노이즈 픽셀(class 0)이 너무 많으면 <code>min_samples</code>를 낮추고,
+      작은 클러스터가 너무 많이 생성되면 <code>min_cluster_size</code>를 높이세요.
+    </div>
+  </div>
+
+  <!-- 5.6 GMM -->
+  <h3 id="s5-gmm">5.6 GMM — 가우시안 혼합 모델</h3>
+
+  <p>GMM은 이미지의 스펙트럼 분포를 가우시안 확률 분포의 혼합으로 모델링합니다. 각 픽셀은 사후 확률이 가장 높은 컴포넌트(클래스)에 할당됩니다. 구형 등크기 클러스터를 가정하는 K-Means와 달리, GMM은 완전 공분산 행렬을 학습하여 다양한 형태와 크기의 클러스터를 모델링할 수 있습니다.</p>
+
+  <h4>동작 원리</h4>
+  <ol class="steps">
+    <li><p><strong>PCA 축소:</strong> K-Means와 동일하게 스펙트럼을 15개 주성분으로 축소합니다.</p></li>
+    <li><p><strong>EM 피팅:</strong> 기대값-최대화(EM) 알고리즘으로 각 가우시안 컴포넌트의 평균, 공분산, 가중치를 반복적으로 추정합니다.</p></li>
+    <li><p><strong>하드 할당:</strong> 각 픽셀을 사후 확률이 가장 높은 컴포넌트에 할당합니다.</p></li>
+  </ol>
+
+  <h4>파라미터</h4>
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th>파라미터</th><th>기본값</th><th>역할</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="param-name">클래스 수</td>
+        <td><span class="param-default">6</span></td>
+        <td>가우시안 컴포넌트 수. 클래스 수 슬라이더로 설정합니다. K-Means와 동일한 가이드라인이 적용됩니다.</td>
+      </tr>
+      <tr>
+        <td class="param-name">covariance_type</td>
+        <td><span class="param-default">full</span></td>
+        <td>컴포넌트별 공분산 행렬 형태. <code>full</code>이 가장 표현력이 높지만 느립니다. 대용량 데이터에서는 <code>diag</code> 또는 <code>tied</code>를 고려하세요.</td>
+      </tr>
+      <tr>
+        <td class="param-name">max_iter</td>
+        <td><span class="param-default">100</span></td>
+        <td>최대 EM 반복 횟수. 수렴되지 않으면 늘리세요(로그에서 수렴 경고 확인).</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout tip">
+    <div class="callout-icon">&#x1F4A1;</div>
+    <div class="callout-body">
+      <strong>GMM 사용 시기</strong>
+      스펙트럼 분포가 길쭉하거나 클래스 크기가 다를 때 K-Means 대신 사용하세요.
+      예: 토양 수분 구배가 넓거나 스펙트럼이 겹치는 작물 품종이 있는 경우.
+    </div>
+  </div>
+
+  <!-- 5.7 NMF -->
+  <h3 id="s5-nmf">5.7 NMF — 비음수 행렬 분해 (스펙트럼 언믹싱)</h3>
+
+  <p>NMF는 초분광 데이터 큐브를 <em>엔드멤버 스펙트럼</em>(순수 스펙트럼 시그니처)과 그에 대응하는 <em>풍도 맵</em>(각 픽셀에서 엔드멤버가 차지하는 비율)으로 분해합니다. 반사율 값은 항상 비음수이므로 NMF는 초분광 데이터에 자연스럽게 적합합니다. 각 픽셀은 풍도가 가장 높은 엔드멤버에 하드 할당되어 시각화됩니다.</p>
+
+  <h4>동작 원리</h4>
+  <ol class="steps">
+    <li><p><strong>분해:</strong> NMF가 <em>Data ≈ W × H</em>를 풀어냅니다. W(픽셀 × 컴포넌트)는 풍도 계수, H(컴포넌트 × 밴드)는 엔드멤버 스펙트럼입니다.</p></li>
+    <li><p><strong>하드 할당:</strong> 각 픽셀을 W에서 풍도가 가장 높은 컴포넌트(엔드멤버)에 할당합니다.</p></li>
+    <li><p><strong>엔드멤버:</strong> H의 각 행이 추출된 순수 스펙트럼 시그니처이며 HTML 리포트에서 확인할 수 있습니다.</p></li>
+  </ol>
+
+  <h4>파라미터</h4>
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th>파라미터</th><th>기본값</th><th>역할</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="param-name">클래스 수</td>
+        <td><span class="param-default">6</span></td>
+        <td>추출할 엔드멤버 컴포넌트 수. 클래스 수 슬라이더로 설정합니다.</td>
+      </tr>
+      <tr>
+        <td class="param-name">max_iter</td>
+        <td><span class="param-default">500</span></td>
+        <td>최대 NMF 반복 횟수. 재구성 오차가 아직 감소 중이면 늘리세요(로그에서 확인).</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout tip">
+    <div class="callout-icon">&#x1F4A1;</div>
+    <div class="callout-body">
+      <strong>NMF 사용 시기</strong>
+      각 픽셀이 토양·낙엽·식생 등 몇 가지 순수 재질의 물리적 혼합이라고 생각될 때 사용하세요.
+      리포트의 엔드멤버 스펙트럼을 스펙트럼 라이브러리와 비교하여 재질을 식별할 수 있습니다.
     </div>
   </div>
 </div>

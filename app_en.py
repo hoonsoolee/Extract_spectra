@@ -100,6 +100,33 @@ METHODS = {
             "Requires labels CSV + PyTorch."
         ),
     },
+    "hdbscan": {
+        "label":  "🔵 HDBSCAN  (Density-Based)",
+        "kind":   "Unsupervised",
+        "help":   (
+            "Hierarchical density-based clustering — **no need to set cluster count**.  \n"
+            "The algorithm finds the number of clusters automatically.  \n"
+            "Noise pixels are assigned to Background (class 0)."
+        ),
+    },
+    "gmm": {
+        "label":  "📈 GMM  (Gaussian Mixture Model)",
+        "kind":   "Unsupervised",
+        "help":   (
+            "Probabilistic soft clustering via Gaussian Mixture Model.  \n"
+            "PCA preprocessing (15 components) then GMM fitting.  \n"
+            "Use the **Number of Classes** slider to set components."
+        ),
+    },
+    "nmf": {
+        "label":  "🧩 NMF  (Spectral Unmixing)",
+        "kind":   "Unsupervised",
+        "help":   (
+            "Non-negative Matrix Factorization — decomposes spectra into  \n"
+            "endmember components and abundance maps.  \n"
+            "Each pixel is assigned to its dominant endmember component."
+        ),
+    },
 }
 
 KIND_COLOR = {"Unsupervised": "🟢", "Supervised": "🔵", "Unsupervised / Supervised": "🟡"}
@@ -364,6 +391,12 @@ with st.sidebar:
     if method == "supervised":
         st.caption("Class count is inferred automatically from the labels CSV.")
         n_classes = 0
+    elif method == "hdbscan":
+        st.caption(
+            "HDBSCAN determines the number of clusters **automatically**. "
+            "The slider is ignored for this method."
+        )
+        n_classes = 0
     else:
         n_classes = st.slider(
             "Clusters / Classes",
@@ -409,6 +442,25 @@ with st.sidebar:
     if method == "cnn":
         with st.expander("CNN Settings", expanded=False):
             cnn_epochs = st.slider("Training epochs", 10, 200, 100, 10)
+
+    hdbscan_min_cluster_size = 50
+    hdbscan_min_samples      = 5
+    if method == "hdbscan":
+        with st.expander("HDBSCAN Settings", expanded=True):
+            hdbscan_min_cluster_size = st.slider(
+                "min_cluster_size", 10, 500, 50, 10,
+                help=(
+                    "Minimum number of pixels to form a cluster. "
+                    "Larger values → fewer, larger clusters."
+                ),
+            )
+            hdbscan_min_samples = st.slider(
+                "min_samples", 1, 50, 5, 1,
+                help=(
+                    "Controls clustering conservatism. "
+                    "Higher values → more noise pixels (class 0)."
+                ),
+            )
 
     labels_csv = ""
     if needs_labels or method == "sam":
@@ -458,7 +510,10 @@ with tab_run:
     with col_left:
         src_info   = f"`{local_folder}`" if data_src == "Local Folder" else f"`{github_repo}`"
         limit_info = str(int(file_limit)) + " file(s)" if file_limit else "all"
-        cls_info   = f"{n_classes} classes" if n_classes else "inferred from labels CSV"
+        if method == "hdbscan":
+            cls_info = "auto-determined (HDBSCAN)"
+        else:
+            cls_info = f"{n_classes} classes" if n_classes else "inferred from labels CSV"
         st.info(
             f"**Method:** {METHODS[method]['label']}  \n"
             f"**Data:** {src_info}  \n"
@@ -550,6 +605,23 @@ with tab_run:
                     "learning_rate": 0.001,
                     "test_split":    0.2,
                     "patience":      15,
+                },
+                "hdbscan": {
+                    "min_cluster_size": hdbscan_min_cluster_size,
+                    "min_samples":      hdbscan_min_samples,
+                    "pca_components":   15,
+                },
+                "gmm": {
+                    "n_components":    n_classes or 6,
+                    "covariance_type": "full",
+                    "max_iter":        100,
+                    "pca_components":  15,
+                    "random_state":    42,
+                },
+                "nmf": {
+                    "n_components": n_classes or 6,
+                    "max_iter":     500,
+                    "random_state": 42,
                 },
             },
             "output": {

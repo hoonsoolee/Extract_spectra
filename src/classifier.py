@@ -12,6 +12,18 @@ hybrid   : Spectral-index rules (NDVI + brightness) → K-means refinement.
 kmeans   : Pure unsupervised K-means on PCA-reduced spectra.
            Good for exploratory analysis; user must label clusters afterwards.
 
+hdbscan  : Hierarchical density-based clustering (HDBSCAN).
+           No need to specify cluster count; the algorithm determines it
+           automatically. Noise pixels (label=-1) are mapped to class 0.
+
+gmm      : Gaussian Mixture Model (soft clustering).
+           Probabilistic assignments via sklearn GaussianMixture.
+           Uses PCA preprocessing same as kmeans (15 components).
+
+nmf      : Non-negative Matrix Factorization (spectral unmixing).
+           Each pixel is assigned to the component with highest activation.
+           Data must be non-negative (reflectance values already are).
+
 supervised : Random Forest / SVM trained on user-supplied labels (CSV).
              Requires a labelled-pixels CSV with columns:
                row, col, class_id
@@ -104,6 +116,12 @@ class HyperspectralClassifier:
             class_map = self._classify_autoencoder(data)
         elif method == "cnn":
             class_map = self._classify_cnn(data, labels_csv)
+        elif method == "hdbscan":
+            class_map = self._classify_hdbscan(data)
+        elif method == "gmm":
+            class_map = self._classify_gmm(data)
+        elif method == "nmf":
+            class_map = self._classify_nmf(data)
         else:
             raise ValueError(f"Unknown classification method: {method}")
 
@@ -440,6 +458,158 @@ class HyperspectralClassifier:
             n_classes=self.cfg.get("cnn", {}).get("n_classes", 4),
             labels_csv=labels_csv,
         ).astype(np.int32)
+
+    # ============================================================
+    # Method 6 – HDBSCAN (hierarchical density-based clustering)
+    # ============================================================
+
+    def _classify_hdbscan(self, data: np.ndarray) -> np.ndarray:
+        """
+        HDBSCAN clustering on PCA-reduced spectra.
+
+        The number of clusters is determined automatically by the algorithm.
+        Noise pixels (HDBSCAN label = -1) are reassigned to class 0
+        (Background).  All detected clusters are 1-indexed.
+        """
+        from sklearn.decomposition import PCA
+
+        cfg = self.cfg.get("hdbscan", {})
+        H, W, B = data.shape
+        min_cluster_size = int(cfg.get("min_cluster_size", 50))
+        min_samples      = int(cfg.get("min_samples", 5))
+        n_pca            = int(cfg.get("pca_components", 15))
+
+        flat = data.reshape(-1, B).astype(np.float64)
+        n_pca = min(n_pca, B, flat.shape[0] - 1)
+        logger.info(f"  HDBSCAN: PCA {B}→{n_pca} components")
+        pca = PCA(n_components=n_pca, random_state=42)
+        flat_pca = pca.fit_transform(flat)
+        explained = pca.explained_variance_ratio_.sum()
+        logger.info(f"  PCA explained variance: {100*explained:.1f}%")
+
+        # Try sklearn >= 1.3 first, then fall back to hdbscan package
+        try:
+            from sklearn.cluster import HDBSCAN as _HDBSCAN
+            hdb = _HDBSCAN(
+                min_cluster_size=min_cluster_size,
+                min_samples=min_samples,
+            )
+            labels = hdb.fit_predict(flat_pca)
+        except ImportError:
+            try:
+                import hdbscan as _hdbscan_pkg
+                hdb = _hdbscan_pkg.HDBSCAN(
+                    min_cluster_size=min_cluster_size,
+                    min_samples=min_samples,
+                )
+                labels = hdb.fit_predict(flat_pca)
+            except ImportError:
+                raise ImportError(
+                    "HDBSCAN requires scikit-learn >= 1.3  or  the 'hdbscan' package.\n"
+                    "Install with: pip install hdbscan"
+                )
+
+        n_noise = int((labels == -1).sum())
+        n_clusters = int(labels.max()) + 1 if labels.max() >= 0 else 0
+        logger.info(
+            f"  HDBSCAN: {n_clusters} clusters found, "
+            f"{n_noise:,} noise pixels → class 0"
+        )
+
+        # Shift so cluster 0 → 1, noise (-1) → 0
+        class_labels = np.where(labels == -1, 0, labels + 1)
+        return class_labels.reshape(H, W)
+
+    # ============================================================
+    # Method 7 – GMM (Gaussian Mixture Model)
+    # ============================================================
+
+    def _classify_gmm(self, data: np.ndarray) -> np.ndarray:
+        """
+        Gaussian Mixture Model clustering on PCA-reduced spectra.
+
+        Uses the same PCA preprocessing as K-Means (15 components by
+        default).  Each pixel is hard-assigned to its most probable
+        component.  Components are 1-indexed.
+        """
+        from sklearn.decomposition import PCA
+        from sklearn.mixture import GaussianMixture
+
+        cfg = self.cfg.get("gmm", {})
+        H, W, B = data.shape
+        n_components    = int(cfg.get("n_components", self.cfg.get("kmeans", {}).get("n_clusters", 6)))
+        covariance_type = str(cfg.get("covariance_type", "full"))
+        max_iter        = int(cfg.get("max_iter", 100))
+        random_state    = int(cfg.get("random_state", 42))
+        n_pca           = int(cfg.get("pca_components", 15))
+
+        flat = data.reshape(-1, B).astype(np.float64)
+        n_pca = min(n_pca, B, flat.shape[0] - 1)
+        logger.info(f"  GMM: PCA {B}→{n_pca} components")
+        pca = PCA(n_components=n_pca, random_state=random_state)
+        flat_pca = pca.fit_transform(flat)
+        explained = pca.explained_variance_ratio_.sum()
+        logger.info(f"  PCA explained variance: {100*explained:.1f}%")
+
+        logger.info(
+            f"  GMM: {n_components} components, "
+            f"covariance_type='{covariance_type}', max_iter={max_iter}"
+        )
+        gmm = GaussianMixture(
+            n_components=n_components,
+            covariance_type=covariance_type,
+            max_iter=max_iter,
+            random_state=random_state,
+        )
+        labels = gmm.fit_predict(flat_pca)
+        logger.info(f"  GMM converged: {gmm.converged_}")
+        class_map = labels.reshape(H, W) + 1  # 1-indexed
+        return class_map
+
+    # ============================================================
+    # Method 8 – NMF (Non-negative Matrix Factorization)
+    # ============================================================
+
+    def _classify_nmf(self, data: np.ndarray) -> np.ndarray:
+        """
+        NMF-based spectral unmixing.
+
+        Each pixel is assigned to the component (endmember) with the
+        highest activation (abundance coefficient).  Components are
+        1-indexed.  Data must be non-negative — reflectance values
+        after normalization are already in [0, 1].
+        """
+        from sklearn.decomposition import NMF
+
+        cfg = self.cfg.get("nmf", {})
+        H, W, B = data.shape
+        n_components = int(cfg.get("n_components", self.cfg.get("kmeans", {}).get("n_clusters", 6)))
+        max_iter     = int(cfg.get("max_iter", 500))
+        random_state = int(cfg.get("random_state", 42))
+
+        flat = data.reshape(-1, B).astype(np.float64)
+
+        # NMF requires non-negative input; clip for safety
+        flat = np.clip(flat, 0.0, None)
+
+        logger.info(
+            f"  NMF: {n_components} components, max_iter={max_iter}"
+        )
+        nmf = NMF(
+            n_components=n_components,
+            max_iter=max_iter,
+            random_state=random_state,
+        )
+        # W: (N_pixels, n_components)  —  activation / abundance matrix
+        W = nmf.fit_transform(flat)
+        logger.info(
+            f"  NMF reconstruction error: {nmf.reconstruction_err_:.4f}"
+        )
+
+        # Hard assignment: pixel → component with highest abundance
+        labels = np.argmax(W, axis=1)
+        class_map = labels.reshape(H, W) + 1  # 1-indexed
+        return class_map
 
     # ============================================================
     # K-means refinement helper
