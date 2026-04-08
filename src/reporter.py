@@ -91,6 +91,27 @@ _T_KO: Dict[str, str] = {
     "band_index":         "밴드 인덱스",
     "reflectance":        "반사율",
     "processing_time":    "처리 시간",
+    # ── 품질 해석 문구 ──
+    "interp_title":         "📋 결과 해석",
+    "quality_what":         "이 점수는 클래스들이 스펙트럼 공간에서 얼마나 잘 분리됐는지를 나타냅니다. 높을수록 각 클래스의 픽셀들이 서로 비슷하고 다른 클래스와는 확실히 다르다는 의미입니다.",
+    "sil_what":             "Silhouette Score란?",
+    "sil_explain":          "각 픽셀이 자기 클래스에 얼마나 잘 속하는지를 -1~+1로 표현합니다. +1에 가까울수록 완벽한 분류, 0은 경계선에 위치, -1은 잘못 분류됐다는 의미입니다.",
+    "db_what":              "Davies-Bouldin Index란?",
+    "db_explain":           "클러스터 내 분산 대비 클러스터 간 거리의 비율입니다. 낮을수록 좋습니다. 1.0 이하이면 양호, 2.0 이상이면 클래스 간 겹침이 심한 편입니다.",
+    "quality_action_good":  "✅ 분류 결과를 신뢰할 수 있습니다. 클래스별 이미지와 스펙트럼 차트를 확인하여 각 클래스의 의미를 해석하세요.",
+    "quality_action_fair":  "⚠️ 일부 클래스 간 겹침이 있습니다. 클래스 수를 조정하거나 다른 분류 방법을 시도해보세요.",
+    "quality_action_poor":  "❌ 클래스 분리가 충분하지 않습니다. 파라미터를 조정하거나 다른 방법을 사용해보세요.",
+    # ── 식생 분리도 해석 문구 ──
+    "veg_interp_title":     "📋 결과 해석",
+    "veg_what":             "NDVI &gt; 0.15인 픽셀을 '실제 식생'으로 보고, 알고리즘이 잎 클래스로 분류한 픽셀과 얼마나 일치하는지를 검증합니다.",
+    "recall_what":          "Recall(검출률)이 낮으면?",
+    "recall_action":        "잎 픽셀이 토양·배경 클래스에 섞여 있습니다. NDVI 임계값을 낮추거나(예: 0.15→0.10) 클래스 수를 늘려보세요.",
+    "precision_what":       "Precision(정밀도)이 낮으면?",
+    "precision_action":     "비식생 픽셀(토양, 경로 등)이 잎 클래스로 잘못 분류됩니다. NDVI 임계값을 높이거나(예: 0.15→0.20) 밝기 임계값을 조정해보세요.",
+    "f1_what":              "F1 점수 해석",
+    "f1_action_good":       "✅ 식생 분리가 잘 됐습니다. 잎 클래스를 분석에 바로 활용할 수 있습니다.",
+    "f1_action_fair":       "⚠️ 식생 분리가 보통 수준입니다. 위의 Recall/Precision을 확인하고 파라미터를 조정하세요.",
+    "f1_action_poor":       "❌ 식생 분리가 좋지 않습니다. Hybrid 방법의 임계값을 조정하거나 다른 방법을 시도해보세요.",
 }
 
 _T_EN: Dict[str, str] = {
@@ -153,6 +174,27 @@ _T_EN: Dict[str, str] = {
     "band_index":         "Band Index",
     "reflectance":        "Reflectance",
     "processing_time":    "Processing Time",
+    # ── Quality interpretation strings ──
+    "interp_title":         "📋 Interpretation",
+    "quality_what":         "This score reflects how well the classes are separated in spectral space. Higher values mean pixels within each class are spectrally similar to each other and distinct from other classes.",
+    "sil_what":             "What is Silhouette Score?",
+    "sil_explain":          "Measures how well each pixel fits its assigned class on a scale of -1 to +1. Near +1 = well classified, 0 = on the boundary between classes, -1 = likely misclassified.",
+    "db_what":              "What is Davies-Bouldin Index?",
+    "db_explain":           "Ratio of within-cluster scatter to between-cluster distance. Lower is better. Below 1.0 is good; above 2.0 indicates significant class overlap.",
+    "quality_action_good":  "✅ The classification result is reliable. Check the per-class images and spectral chart to interpret the meaning of each class.",
+    "quality_action_fair":  "⚠️ Some class overlap detected. Try adjusting the number of classes or switching to a different method.",
+    "quality_action_poor":  "❌ Class separation is insufficient. Adjust parameters or try a different classification method.",
+    # ── Vegetation separation interpretation strings ──
+    "veg_interp_title":     "📋 Interpretation",
+    "veg_what":             "Pixels with NDVI &gt; 0.15 are treated as ground-truth vegetation. These metrics measure how closely the algorithm's leaf classes match that reference.",
+    "recall_what":          "Low Recall?",
+    "recall_action":        "Leaf pixels are being placed in soil or background classes. Try lowering the NDVI threshold (e.g. 0.15 → 0.10) or increasing the number of classes.",
+    "precision_what":       "Low Precision?",
+    "precision_action":     "Non-vegetation pixels (soil, paths, etc.) are being classified as leaves. Try raising the NDVI threshold (e.g. 0.15 → 0.20) or adjusting the brightness threshold.",
+    "f1_what":              "F1 Score",
+    "f1_action_good":       "✅ Vegetation separation is good. The leaf classes can be used directly for spectral analysis.",
+    "f1_action_fair":       "⚠️ Vegetation separation is moderate. Check Recall and Precision above and adjust parameters.",
+    "f1_action_poor":       "❌ Vegetation separation is poor. Adjust the Hybrid thresholds or try a different method.",
 }
 
 
@@ -787,6 +829,52 @@ class Reporter:
                 f'<span class="badge" style="background:{gauge_color};'
                 f'font-size:13px;padding:5px 14px;">{interp}</span></p>'
             )
+
+        # ── Interpretation box ─────────────────────────────────────
+        if quality is not None:
+            if quality >= 85:
+                action_key = "quality_action_good"
+                action_bg  = "#e8f5e9"
+                action_bd  = "#a5d6a7"
+            elif quality >= 50:
+                action_key = "quality_action_fair"
+                action_bg  = "#fff9c4"
+                action_bd  = "#f9e04b"
+            else:
+                action_key = "quality_action_poor"
+                action_bg  = "#ffebee"
+                action_bd  = "#ef9a9a"
+
+            parts.append(f"""
+<div style="margin-top:18px;padding:14px 16px;background:#f5f5f5;
+            border-radius:8px;border-left:4px solid #2980b9;">
+  <div style="font-weight:700;font-size:13px;margin-bottom:8px;color:#1a1a1a;">
+    {self._t('interp_title')}
+  </div>
+  <p style="margin:0 0 10px 0;font-size:12.5px;color:#333;line-height:1.6;">
+    {self._t('quality_what')}
+  </p>
+  <div style="background:{action_bg};border:1px solid {action_bd};
+              border-radius:6px;padding:8px 12px;font-size:12.5px;
+              color:#333;margin-bottom:10px;">
+    {self._t(action_key)}
+  </div>
+  <table style="width:100%;border-collapse:collapse;font-size:12px;">
+    <tr>
+      <td style="padding:6px 8px;background:#fff;border:1px solid #e0e0e0;
+                 vertical-align:top;width:50%;">
+        <strong>{self._t('sil_what')}</strong><br>
+        <span style="color:#555;line-height:1.5;">{self._t('sil_explain')}</span>
+      </td>
+      <td style="padding:6px 8px;background:#fff;border:1px solid #e0e0e0;
+                 vertical-align:top;width:50%;">
+        <strong>{self._t('db_what')}</strong><br>
+        <span style="color:#555;line-height:1.5;">{self._t('db_explain')}</span>
+      </td>
+    </tr>
+  </table>
+</div>""")
+
         return parts
 
     # ---- Vegetation separation card ──────────────────────────────
@@ -866,6 +954,70 @@ class Reporter:
             parts.append(
                 f'<p style="color:#aaa;font-size:12px;">{self._t("no_ndvi")}</p>'
             )
+
+        # ── Vegetation interpretation box ──────────────────────────
+        if recall is not None and f1 is not None:
+            if f1 >= 0.85:
+                f1_key = "f1_action_good"
+                f1_bg  = "#e8f5e9"
+                f1_bd  = "#a5d6a7"
+            elif f1 >= 0.60:
+                f1_key = "f1_action_fair"
+                f1_bg  = "#fff9c4"
+                f1_bd  = "#f9e04b"
+            else:
+                f1_key = "f1_action_poor"
+                f1_bg  = "#ffebee"
+                f1_bd  = "#ef9a9a"
+
+            low_recall    = recall    < 0.65
+            low_precision = precision is not None and precision < 0.65
+
+            hint_rows = ""
+            if low_recall:
+                hint_rows += f"""
+      <tr>
+        <td style="padding:6px 8px;background:#fff3e0;border:1px solid #ffe0b2;
+                   vertical-align:top;width:50%;">
+          <strong>{self._t('recall_what')}</strong><br>
+          <span style="color:#555;line-height:1.5;">{self._t('recall_action')}</span>
+        </td>"""
+            if low_precision:
+                hint_rows += f"""
+        <td style="padding:6px 8px;background:#fff3e0;border:1px solid #ffe0b2;
+                   vertical-align:top;width:50%;">
+          <strong>{self._t('precision_what')}</strong><br>
+          <span style="color:#555;line-height:1.5;">{self._t('precision_action')}</span>
+        </td>
+      </tr>"""
+            elif low_recall:
+                hint_rows += "</tr>"
+
+            if not low_recall and not low_precision:
+                hint_rows = ""
+
+            table_html = (
+                f'<table style="width:100%;border-collapse:collapse;'
+                f'font-size:12px;margin-top:8px;">{hint_rows}</table>'
+                if hint_rows else ""
+            )
+
+            parts.append(f"""
+<div style="margin-top:18px;padding:14px 16px;background:#f5f5f5;
+            border-radius:8px;border-left:4px solid #2e7d62;">
+  <div style="font-weight:700;font-size:13px;margin-bottom:8px;color:#1a1a1a;">
+    {self._t('veg_interp_title')}
+  </div>
+  <p style="margin:0 0 10px 0;font-size:12.5px;color:#333;line-height:1.6;">
+    {self._t('veg_what')}
+  </p>
+  <div style="background:{f1_bg};border:1px solid {f1_bd};
+              border-radius:6px;padding:8px 12px;font-size:12.5px;
+              color:#333;margin-bottom:6px;">
+    <strong>{self._t('f1_what')}:</strong> {self._t(f1_key)}
+  </div>
+  {table_html}
+</div>""")
 
         # ── Leaf ↔ non-leaf spectral distance bar chart ────────────
         if bars:
