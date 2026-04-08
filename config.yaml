@@ -46,7 +46,7 @@ wavelengths:
 
 # --- Classification ---
 classification:
-  method: "hybrid"            # "hybrid" | "kmeans" | "supervised"
+  method: "hybrid"            # "hybrid" | "kmeans" | "sam" | "supervised" | "autoencoder" | "cnn"
 
   # ---- Hybrid Method (recommended for no-label scenarios) ----
   # Step 1: Vegetation detection via NDVI
@@ -79,6 +79,34 @@ classification:
     max_iter: 300
     random_state: 42
 
+  # ---- Spectral Angle Mapper (SAM) ----
+  # Brightness-invariant: classifies by spectral shape, not magnitude.
+  # Supervised  : pass --labels CSV (row,col,class_id)  → average pixel per class = endmember
+  # Unsupervised: auto-extracts endmembers via K-means  (no labels needed)
+  sam:
+    angle_threshold: 0.10     # Max angle (radians, ~5.7°) to accept a match; 0 = no rejection
+    n_endmembers: 6           # Clusters used when auto-extracting endmembers (unsupervised)
+    endmember_pca: 15         # PCA components before K-means endmember extraction (0 = off)
+
+  # ---- Autoencoder + K-means (unsupervised deep learning) ----
+  autoencoder:
+    latent_dim: 16          # Compressed spectral dimension
+    n_clusters: 8           # K-means clusters on latent vectors
+    epochs: 60              # Training epochs
+    batch_size: 1024
+    learning_rate: 0.001
+    max_pixels: 100000      # Max pixels sampled for training
+
+  # ---- 1D-CNN (supervised deep learning) ----
+  # Requires --labels CSV: row,col,class_id
+  cnn:
+    n_classes: null         # Auto-detected from label CSV
+    epochs: 100
+    batch_size: 512
+    learning_rate: 0.001
+    test_split: 0.2         # Fraction used for validation
+    patience: 15            # Early-stopping patience (epochs without improvement)
+
   # ---- Class definitions ----
   classes:
     - id: 0
@@ -96,6 +124,15 @@ classification:
     - id: 4
       name: "Other"
       color: [160, 160, 160]
+
+# --- Spectrum Extraction ---
+extraction:
+  # Number of nearest pixels used for MNA and SAM-avg columns.
+  # These pixels are selected from each class based on proximity to the
+  # per-band median spectrum, either by Euclidean distance (mna) or
+  # Spectral Angle (sam_avg).
+  # Increase for smoother averages; decrease if classes are small.
+  n_neighbors: 100
 
 # --- Output ---
 output:
