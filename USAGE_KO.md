@@ -75,6 +75,9 @@ python -m streamlit run app_en.py
 | **Hybrid** | 비지도 | 불필요 | **기본 추천.** NDVI → 밝기 → K-means |
 | **K-Means** | 비지도 | 불필요 | 탐색적 분석 |
 | **SAM** | 비지도 / 지도 | 선택 | 조명 불변 스펙트럼 각도 매핑 |
+| **HDBSCAN** | 비지도 | 불필요 | 클러스터 수 자동 결정; 불규칙 형태 클러스터에 최적 |
+| **GMM** | 비지도 | 불필요 | 확률적 소프트 클러스터링; 겹치는 클래스에 유리 |
+| **NMF** | 비지도 | 불필요 | 스펙트럼 언믹싱; 혼합 픽셀 분석에 적합 |
 | **Random Forest** | 지도 | **필요** | 라벨 있을 때 높은 정확도 |
 | **Autoencoder** | 비지도 | 불필요 | PyTorch 필요 |
 | **1D-CNN** | 지도 | **필요** | PyTorch 필요 |
@@ -86,18 +89,33 @@ python -m streamlit run app_en.py
 ```
 output/
 └── <파일명>/
-    ├── spectra.csv       # 클래스별 평균·표준편차 반사율 스펙트럼
-    ├── class_map.png     # 분류 맵 이미지
-    └── report_YYYYMMDD_HHMMSS.html   # 인터랙티브 HTML 리포트
+    ├── spectra_{method}.csv                  # 예: spectra_kmeans.csv
+    ├── class_map_{method}.png                # 예: class_map_hybrid.png
+    └── report_YYYYMMDD_HHMMSS_{method}.html  # 예: report_20260408_130351_kmeans.html
 ```
+
+출력 파일명에 방법 이름이 포함되므로 같은 폴더에 여러 방법의 결과를 함께 저장해도 덮어쓰기가 발생하지 않습니다.
+
+`spectra_{method}.csv` 파일은 **클래스별·밴드별 7개 통계값**을 포함합니다:
+
+| 열 접미사 | 설명 |
+|-----------|------|
+| `mean` | 클래스 내 모든 픽셀의 평균 반사율 |
+| `std` | 표준편차 (스펙트럼 변동성) |
+| `median` | 밴드별 중앙값 |
+| `q25` / `q75` | 25번째 / 75번째 백분위수 |
+| `mna` | **Medoid-Neighbourhood Average** — 클래스 중앙값에 유클리드 거리가 가장 가까운 100개 픽셀의 평균. 이상치를 제거하면서 실제 픽셀만 평균. |
+| `sam_avg` | **SAM-Neighbourhood Average** — 중앙값에 스펙트럼 각도가 가장 작은 100개 픽셀의 평균. 조명 불변; Vcmax · 생화학 특성 매칭에 권장. |
+
+열 이름은 `{파일명}_{방법}_{클래스}_{통계}` 형식(예: `AP3-4_kmeans_Sunlit_Leaves_sam_avg`)이므로 여러 파일·방법의 CSV를 합쳐도 열 충돌이 없습니다. `mna`·`sam_avg`에 사용하는 이웃 수(기본값 100)는 `config.yaml`의 `extraction.n_neighbors`에서 변경할 수 있습니다.
 
 `.html` 파일을 브라우저에서 열면 다음 내용을 확인할 수 있습니다:
 - RGB / CIR 합성 이미지
 - 통합 분류 맵
 - 클래스별 분류 이미지 (색상 강조)
 - 인터랙티브 반사율 스펙트럼 차트
-- 클러스터 품질 지표 (Silhouette, Davies-Bouldin)
-- 식생 분리도 평가 (NDVI 기반 Recall / Precision / F1)
+- 클러스터 품질 지표 (Silhouette, Davies-Bouldin) + 색상 코딩 해석 박스
+- 식생 분리도 평가 (NDVI 기반 Recall / Precision / F1) + 개선 안내
 - **파일별 처리 시간**
 
 ---

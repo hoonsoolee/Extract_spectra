@@ -1191,7 +1191,7 @@ cd Extract_spectra</pre>
     </div>
   </div>
 
-  <p>After each run, a file named <code>report_YYYYMMDD_HHMMSS.html</code> is saved in the output folder.
+  <p>After each run, a file named <code>report_YYYYMMDD_HHMMSS_<em>{method}</em>.html</code> (e.g. <code>report_20260408_130351_kmeans.html</code>) is saved in the output folder.
   Open it in any browser (Chrome, Firefox, Edge, Safari). It is fully self-contained — no internet required.</p>
 
   <!-- 9.1 -->
@@ -1244,6 +1244,22 @@ cd Extract_spectra</pre>
   <!-- 9.4 -->
   <h3 id="s9-spectra">9.4 Reflectance Spectra Chart</h3>
   <p>An interactive Plotly chart showing the mean reflectance spectrum for each class, plotted against wavelength (nm) or band index. The shaded band around each line is &plusmn;1 standard deviation, indicating spectral variability within the class.</p>
+
+  <p>The accompanying <code>spectra_{method}.csv</code> file contains <strong>7 statistics per class per band</strong>:</p>
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th>Column suffix</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><code>mean</code></td><td>Mean reflectance across all pixels in the class.</td></tr>
+      <tr><td><code>std</code></td><td>Standard deviation — spectral variability within the class.</td></tr>
+      <tr><td><code>median</code></td><td>Per-band median reflectance.</td></tr>
+      <tr><td><code>q25</code> / <code>q75</code></td><td>25th and 75th percentile reflectance.</td></tr>
+      <tr><td><code>mna</code></td><td><strong>Medoid-Neighbourhood Average</strong> — mean of the 100 pixels closest to the class median in Euclidean distance. Removes outliers while averaging real pixels. More stable than the pure median.</td></tr>
+      <tr><td><code>sam_avg</code></td><td><strong>SAM-Neighbourhood Average</strong> — mean of the 100 pixels with the smallest Spectral Angle to the median. Illumination-invariant (selects by spectral shape only). Recommended for Vcmax / biochemical trait matching.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>Column names follow the format <code>{filename}_{method}_{class}_{stat}</code> (e.g. <code>AP3-4_kmeans_Sunlit_Leaves_sam_avg</code>), so CSVs from multiple files and methods can be merged without column collisions. The number of neighbours used for <code>mna</code> and <code>sam_avg</code> (default 100) can be changed via <code>extraction.n_neighbors</code> in <code>config.yaml</code>.</p>
 
   <div class="tbl-wrap">
   <table>
@@ -1298,6 +1314,18 @@ cd Extract_spectra</pre>
   <h4>Davies-Bouldin Index</h4>
   <p>Measures the ratio of within-cluster scatter to between-cluster separation. Lower is better. Values below 1.0 are generally good; values above 2.0 suggest significant class overlap. Unlike the Silhouette Score, there is no universal "ideal" cutoff — it is most useful for comparing two runs of the same image.</p>
 
+  <p>The HTML report displays a plain-language interpretation box below each metric:</p>
+  <div class="two-col">
+    <div style="background:#e8f5e9;border-left:4px solid #27ae60;padding:14px 16px;border-radius:0 8px 8px 0;">
+      <strong style="color:#27ae60;">Good (green tip):</strong>
+      <p style="margin:6px 0 0;font-size:13px;">Silhouette &ge; 75% and DB &le; 1.0 — classes are well separated. Results are reliable for scientific analysis.</p>
+    </div>
+    <div style="background:#fff8e6;border-left:4px solid #e67e22;padding:14px 16px;border-radius:0 8px 8px 0;">
+      <strong style="color:#e67e22;">Fair / Poor (yellow or red tip):</strong>
+      <p style="margin:6px 0 0;font-size:13px;">Some or significant class overlap detected. The tip suggests specific actions: try a different method, adjust the number of classes, or tune thresholds.</p>
+    </div>
+  </div>
+
   <!-- 9.6 -->
   <h3 id="s9-veg">9.6 Vegetation Separation Assessment</h3>
   <p>This section evaluates how accurately the algorithm identified vegetation pixels, using NDVI as an independent ground truth. It answers: <em>of all pixels that NDVI says are vegetation, how many were correctly labelled as leaves?</em></p>
@@ -1327,6 +1355,15 @@ cd Extract_spectra</pre>
   </table>
   </div>
 
+  <p>The HTML report shows a colour-coded verdict box below the metrics table:</p>
+  <ul style="font-size:14px;padding-left:20px;color:#333;">
+    <li><strong style="color:#27ae60;">F1 &ge; 0.85</strong> — Excellent vegetation separation. No action needed.</li>
+    <li><strong style="color:#f39c12;">0.65 &le; F1 &lt; 0.85</strong> — Acceptable. Review Per-Class Images to confirm.</li>
+    <li><strong style="color:#e74c3c;">F1 &lt; 0.65</strong> — Poor. The report provides specific guidance:<br>
+      &nbsp;&nbsp;• Low Recall (&lt; 65%): leaf pixels are missed &rarr; lower the NDVI threshold.<br>
+      &nbsp;&nbsp;• Low Precision (&lt; 65%): non-vegetation is labelled as leaves &rarr; raise the NDVI threshold.</li>
+  </ul>
+
   <div class="callout info">
     <div class="callout-icon">&#x2139;</div>
     <div class="callout-body">
@@ -1352,27 +1389,29 @@ cd Extract_spectra</pre>
   <div class="file-tree">
     <span class="dir">output/</span><br>
     &nbsp;&nbsp;<span class="dir">+-- image_filename/</span><br>
-    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- spectra.csv</span> &nbsp;<span class="comment">← per-class mean &amp; std reflectance spectra</span><br>
-    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- class_map.png</span> &nbsp;<span class="comment">← classification map with colour legend</span><br>
-    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- report_20240407_143022.html</span> &nbsp;<span class="comment">← full interactive HTML report</span>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- spectra_kmeans.csv</span> &nbsp;<span class="comment">← per-class spectra (7 stats); name includes method</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- class_map_kmeans.png</span> &nbsp;<span class="comment">← classification map with colour legend</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- report_20260408_130351_kmeans.html</span> &nbsp;<span class="comment">← full interactive HTML report</span>
   </div>
 
-  <div class="tbl-wrap" style="margin-top:20px;">
+  <p style="margin-top:12px;font-size:14px;color:#555;">The method name is embedded in every output filename so results from different methods can coexist in the same folder.</p>
+
+  <div class="tbl-wrap" style="margin-top:12px;">
   <table>
     <thead><tr><th>File</th><th>Contents</th><th>How to use</th></tr></thead>
     <tbody>
       <tr>
-        <td><code>spectra.csv</code></td>
-        <td>One row per spectral band. Columns: wavelength (nm), mean reflectance per class, standard deviation per class.</td>
+        <td><code>spectra_{method}.csv</code></td>
+        <td>One row per spectral band. Seven statistics per class: <code>mean</code>, <code>std</code>, <code>median</code>, <code>q25</code>, <code>q75</code>, <code>mna</code>, <code>sam_avg</code>. Column names include filename, method, class, and statistic to support merging across files.</td>
         <td>Open in Excel, or load with <code>pandas.read_csv()</code> in Python or <code>read.csv()</code> in R for further spectral analysis.</td>
       </tr>
       <tr>
-        <td><code>class_map.png</code></td>
+        <td><code>class_map_{method}.png</code></td>
         <td>Colour-coded classification map with a legend showing class names, pixel counts, and percentages.</td>
         <td>Include directly in reports or presentations. No software needed to view.</td>
       </tr>
       <tr>
-        <td><code>report_*.html</code></td>
+        <td><code>report_*_{method}.html</code></td>
         <td>Self-contained HTML file with all images, interactive charts, tables, and quality metrics.</td>
         <td>Open in any web browser. No internet connection required. Use File &rarr; Print (Ctrl+P) to save as PDF.</td>
       </tr>
@@ -1464,8 +1503,11 @@ cd Extract_spectra</pre>
       <tr><td>First time, standard crop image with NIR</td><td><strong>Hybrid</strong></td><td>6</td><td>Default settings</td></tr>
       <tr><td>No NIR band in the image</td><td><strong>K-Means</strong></td><td>6</td><td>Default settings</td></tr>
       <tr><td>Strong shadows / uneven lighting</td><td><strong>SAM</strong></td><td>6</td><td>Angle threshold: 0.15</td></tr>
+      <tr><td>Unknown number of classes / irregular clusters</td><td><strong>HDBSCAN</strong></td><td>Auto</td><td>min_cluster_size: 50</td></tr>
+      <tr><td>Overlapping or differently-sized spectral classes</td><td><strong>GMM</strong></td><td>6</td><td>covariance_type: full</td></tr>
+      <tr><td>Mixed-pixel / spectral unmixing analysis</td><td><strong>NMF</strong></td><td>6</td><td>max_iter: 500</td></tr>
       <tr><td>Want deep learning features (PyTorch installed)</td><td><strong>Autoencoder</strong></td><td>6</td><td>Epochs: 60</td></tr>
-      <tr><td>Comparing methods</td><td><strong>All four</strong></td><td>—</td><td>Use Single File mode, same image</td></tr>
+      <tr><td>Comparing methods</td><td><strong>All seven</strong></td><td>—</td><td>Use Single File mode, same image</td></tr>
     </tbody>
   </table>
   </div>
@@ -1508,13 +1550,13 @@ cd Extract_spectra</pre>
       </ul>
     </div>
     <div class="qr-card">
-      <h4>Using the spectra.csv</h4>
+      <h4>Using the spectra_{method}.csv</h4>
       <ul>
-        <li>Python: <code>pd.read_csv("spectra.csv")</code></li>
-        <li>R: <code>read.csv("spectra.csv")</code></li>
+        <li>Python: <code>pd.read_csv("spectra_kmeans.csv")</code></li>
+        <li>R: <code>read.csv("spectra_hybrid.csv")</code></li>
         <li>Excel: File &rarr; Open directly</li>
         <li>Rows = spectral bands</li>
-        <li>Columns = class mean / std</li>
+        <li>7 stats per class: mean, std, median, q25, q75, mna, sam_avg</li>
       </ul>
     </div>
     <div class="qr-card">

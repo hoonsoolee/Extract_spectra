@@ -75,6 +75,9 @@ Your browser will open automatically at `http://localhost:8501`.
 | **Hybrid** | Unsupervised | No | **Recommended default.** NDVI → brightness → K-means |
 | **K-Means** | Unsupervised | No | Exploratory analysis |
 | **SAM** | Unsupervised / Supervised | Optional | Illumination-invariant |
+| **HDBSCAN** | Unsupervised | No | Auto cluster count; best for irregular-shaped clusters |
+| **GMM** | Unsupervised | No | Probabilistic soft clustering; good for overlapping classes |
+| **NMF** | Unsupervised | No | Spectral unmixing; good for mixed-pixel analysis |
 | **Random Forest** | Supervised | **Yes** | Highest accuracy with labels |
 | **Autoencoder** | Unsupervised | No | Requires PyTorch |
 | **1D-CNN** | Supervised | **Yes** | Requires PyTorch |
@@ -86,18 +89,33 @@ After the analysis you will see:
 ```
 output/
 └── <filename>/
-    ├── spectra.csv       # Per-class mean & std reflectance spectra
-    ├── class_map.png     # Classification map image
-    └── report_YYYYMMDD_HHMMSS.html   # Full interactive HTML report
+    ├── spectra_{method}.csv          # e.g. spectra_kmeans.csv
+    ├── class_map_{method}.png        # e.g. class_map_hybrid.png
+    └── report_YYYYMMDD_HHMMSS_{method}.html   # e.g. report_20260408_130351_kmeans.html
 ```
+
+The method name is included in every output filename so that results from different methods can coexist in the same folder without overwriting each other.
+
+The `spectra_{method}.csv` file contains **7 statistics per class per band**:
+
+| Column suffix | Description |
+|---------------|-------------|
+| `mean` | Mean reflectance across all pixels in the class |
+| `std` | Standard deviation (spectral variability) |
+| `median` | Per-band median |
+| `q25` / `q75` | 25th / 75th percentile |
+| `mna` | **Medoid-Neighbourhood Average** — mean of the 100 pixels closest to the class median in Euclidean distance. Removes outliers while averaging real pixels. |
+| `sam_avg` | **SAM-Neighbourhood Average** — mean of the 100 pixels with the smallest Spectral Angle to the median. Illumination-invariant; recommended for Vcmax / biochemical trait matching. |
+
+Column names follow the format `{filename}_{method}_{class}_{stat}` (e.g. `AP3-4_kmeans_Sunlit_Leaves_sam_avg`), so CSVs from multiple files and methods can be merged without column collisions. The number of neighbours used for `mna` and `sam_avg` (default 100) is configurable via `extraction.n_neighbors` in `config.yaml`.
 
 Open the `.html` file in any browser to view:
 - RGB / CIR composite images
 - Classification map
 - Per-class overlay images (colour-highlighted)
 - Interactive reflectance spectra chart
-- Cluster quality metrics (Silhouette, Davies-Bouldin)
-- Vegetation separation accuracy (NDVI-based Recall / Precision / F1)
+- Cluster quality metrics (Silhouette, Davies-Bouldin) with colour-coded interpretation box
+- Vegetation separation accuracy (NDVI-based Recall / Precision / F1) with actionable guidance
 - **Processing time** per file
 
 ---

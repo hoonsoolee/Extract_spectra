@@ -1063,7 +1063,7 @@ cd Extract_spectra</pre>
     </div>
   </div>
 
-  <p>실행 후 출력 폴더에 <code>report_YYYYMMDD_HHMMSS.html</code> 파일이 저장됩니다.
+  <p>실행 후 출력 폴더에 <code>report_YYYYMMDD_HHMMSS_<em>{방법}</em>.html</code> (예: <code>report_20260408_130351_kmeans.html</code>) 파일이 저장됩니다.
   모든 브라우저(Chrome, Firefox, Edge, Safari)에서 열 수 있습니다. 완전히 독립 실행형 파일이므로 인터넷이 필요 없습니다.</p>
 
   <!-- 9.1 -->
@@ -1115,6 +1115,22 @@ cd Extract_spectra</pre>
   <!-- 9.4 -->
   <h3 id="s9-spectra">9.4 반사율 스펙트럼 차트</h3>
   <p>각 클래스의 평균 반사율 스펙트럼을 파장(nm) 또는 밴드 인덱스에 따라 그린 인터랙티브 Plotly 차트입니다. 선 주변의 음영 영역은 &plusmn;1 표준편차로 클래스 내 스펙트럼 변동성을 나타냅니다.</p>
+
+  <p>함께 저장되는 <code>spectra_{방법}.csv</code> 파일은 <strong>클래스별·밴드별 7개 통계값</strong>을 포함합니다:</p>
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th>열 접미사</th><th>설명</th></tr></thead>
+    <tbody>
+      <tr><td><code>mean</code></td><td>클래스 내 모든 픽셀의 평균 반사율.</td></tr>
+      <tr><td><code>std</code></td><td>표준편차 — 클래스 내 스펙트럼 변동성.</td></tr>
+      <tr><td><code>median</code></td><td>밴드별 중앙값 반사율.</td></tr>
+      <tr><td><code>q25</code> / <code>q75</code></td><td>25번째 / 75번째 백분위수 반사율.</td></tr>
+      <tr><td><code>mna</code></td><td><strong>Medoid-Neighbourhood Average</strong> — 클래스 중앙값에 유클리드 거리가 가장 가까운 100개 픽셀의 평균. 이상치를 제거하면서 실제 픽셀만 평균화. 순수 중앙값보다 안정적.</td></tr>
+      <tr><td><code>sam_avg</code></td><td><strong>SAM-Neighbourhood Average</strong> — 중앙값에 스펙트럼 각도가 가장 작은 100개 픽셀의 평균. 조명 불변(스펙트럼 형태로만 선택). Vcmax · 생화학 특성 매칭에 권장.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>열 이름은 <code>{파일명}_{방법}_{클래스}_{통계}</code> 형식(예: <code>AP3-4_kmeans_Sunlit_Leaves_sam_avg</code>)이므로 여러 파일·방법의 CSV를 합쳐도 열 충돌이 없습니다. <code>mna</code>·<code>sam_avg</code>에 사용하는 이웃 수(기본값 100)는 <code>config.yaml</code>의 <code>extraction.n_neighbors</code>에서 변경할 수 있습니다.</p>
 
   <div class="tbl-wrap">
   <table>
@@ -1170,6 +1186,18 @@ cd Extract_spectra</pre>
   <h4>Davies-Bouldin 지수</h4>
   <p>클러스터 내 분산과 클러스터 간 거리의 비율을 측정합니다. 낮을수록 좋습니다. 1.0 이하는 일반적으로 양호, 2.0 이상은 클래스 간 겹침이 심함을 시사합니다. 절대적 기준보다는 같은 이미지에서 두 실행 결과를 비교할 때 유용합니다.</p>
 
+  <p>HTML 리포트는 각 지표 아래 색상 코딩된 해석 박스를 표시합니다:</p>
+  <div class="two-col">
+    <div style="background:#e8f5e9;border-left:4px solid #27ae60;padding:14px 16px;border-radius:0 8px 8px 0;">
+      <strong style="color:#27ae60;">양호 (녹색 팁):</strong>
+      <p style="margin:6px 0 0;font-size:13px;">Silhouette &ge; 75% 이고 DB &le; 1.0 — 클래스가 잘 분리됨. 과학적 분석에 신뢰할 수 있는 결과.</p>
+    </div>
+    <div style="background:#fff8e6;border-left:4px solid #e67e22;padding:14px 16px;border-radius:0 8px 8px 0;">
+      <strong style="color:#e67e22;">보통 / 불량 (노랑 또는 빨강 팁):</strong>
+      <p style="margin:6px 0 0;font-size:13px;">클래스 간 겹침이 일부 또는 심각하게 감지됨. 팁에 구체적 조치(다른 방법 시도, 클래스 수 조정, 임계값 조정 등)가 제시됩니다.</p>
+    </div>
+  </div>
+
   <!-- 9.6 -->
   <h3 id="s9-veg">9.6 식생 분리도 평가</h3>
   <p>NDVI를 독립적인 Ground Truth로 사용해 알고리즘이 식생 픽셀을 얼마나 정확하게 찾아냈는지 평가합니다. 즉, "NDVI가 식생이라고 말하는 픽셀 중 몇 %가 잎 클래스에 들어갔는가?"를 답합니다.</p>
@@ -1199,6 +1227,15 @@ cd Extract_spectra</pre>
   </table>
   </div>
 
+  <p>HTML 리포트는 지표 표 아래 색상 코딩된 판정 박스를 표시합니다:</p>
+  <ul style="font-size:14px;padding-left:20px;color:#333;">
+    <li><strong style="color:#27ae60;">F1 &ge; 0.85</strong> — 우수한 식생 분리. 별도 조치 불필요.</li>
+    <li><strong style="color:#f39c12;">0.65 &le; F1 &lt; 0.85</strong> — 허용 가능. 클래스별 이미지를 확인하세요.</li>
+    <li><strong style="color:#e74c3c;">F1 &lt; 0.65</strong> — 불량. 리포트에 구체적 안내가 표시됩니다:<br>
+      &nbsp;&nbsp;• Recall &lt; 65%: 잎 픽셀이 누락됨 &rarr; NDVI 임계값을 낮추세요.<br>
+      &nbsp;&nbsp;• Precision &lt; 65%: 비식생이 잎으로 분류됨 &rarr; NDVI 임계값을 높이세요.</li>
+  </ul>
+
   <div class="callout info">
     <div class="callout-icon">&#x2139;</div>
     <div class="callout-body">
@@ -1225,27 +1262,29 @@ cd Extract_spectra</pre>
   <div class="file-tree">
     <span class="dir">output/</span><br>
     &nbsp;&nbsp;<span class="dir">+-- 이미지_파일명/</span><br>
-    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- spectra.csv</span> &nbsp;<span class="comment">← 클래스별 평균·표준편차 반사율 스펙트럼</span><br>
-    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- class_map.png</span> &nbsp;<span class="comment">← 색상 범례가 포함된 분류 맵 이미지</span><br>
-    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- report_20240407_143022.html</span> &nbsp;<span class="comment">← 인터랙티브 HTML 리포트</span>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- spectra_kmeans.csv</span> &nbsp;<span class="comment">← 클래스별 반사율 스펙트럼 (7개 통계값); 방법명 포함</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- class_map_kmeans.png</span> &nbsp;<span class="comment">← 색상 범례가 포함된 분류 맵 이미지</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- report_20260408_130351_kmeans.html</span> &nbsp;<span class="comment">← 인터랙티브 HTML 리포트</span>
   </div>
 
-  <div class="tbl-wrap" style="margin-top:20px;">
+  <p style="margin-top:12px;font-size:14px;color:#555;">출력 파일명에 방법 이름이 포함되므로 같은 폴더에 여러 방법의 결과를 함께 저장해도 덮어쓰기가 발생하지 않습니다.</p>
+
+  <div class="tbl-wrap" style="margin-top:12px;">
   <table>
     <thead><tr><th>파일</th><th>내용</th><th>활용 방법</th></tr></thead>
     <tbody>
       <tr>
-        <td><code>spectra.csv</code></td>
-        <td>밴드별 한 행. 컬럼: 파장(nm), 클래스별 평균 반사율, 표준편차.</td>
+        <td><code>spectra_{방법}.csv</code></td>
+        <td>밴드별 한 행. 클래스별 7개 통계값: <code>mean</code>, <code>std</code>, <code>median</code>, <code>q25</code>, <code>q75</code>, <code>mna</code>, <code>sam_avg</code>. 열 이름에 파일명·방법·클래스·통계가 포함되어 여러 CSV 병합에 적합.</td>
         <td>Excel에서 직접 열거나, Python에서 <code>pandas.read_csv()</code>, R에서 <code>read.csv()</code>로 불러와 추가 스펙트럼 분석에 활용.</td>
       </tr>
       <tr>
-        <td><code>class_map.png</code></td>
+        <td><code>class_map_{방법}.png</code></td>
         <td>클래스 이름, 픽셀 수, 비율이 담긴 범례가 포함된 색상 분류 맵.</td>
         <td>보고서나 발표 자료에 바로 삽입. 별도 소프트웨어 불필요.</td>
       </tr>
       <tr>
-        <td><code>report_*.html</code></td>
+        <td><code>report_*_{방법}.html</code></td>
         <td>모든 이미지, 인터랙티브 차트, 표, 품질 지표가 담긴 독립 실행형 HTML.</td>
         <td>브라우저에서 열기. 인터넷 불필요. <code>Ctrl+P</code> → "PDF로 저장"으로 PDF 변환 가능.</td>
       </tr>
@@ -1337,8 +1376,11 @@ cd Extract_spectra</pre>
       <tr><td>처음 사용, NIR 있는 일반 작물 이미지</td><td><strong>Hybrid</strong></td><td>6</td><td>기본값 사용</td></tr>
       <tr><td>NIR 밴드가 없는 이미지</td><td><strong>K-Means</strong></td><td>6</td><td>기본값 사용</td></tr>
       <tr><td>그림자가 많거나 조명 불균일</td><td><strong>SAM</strong></td><td>6</td><td>각도 임계값: 0.15</td></tr>
+      <tr><td>클래스 수 모름 / 불규칙 경계 클러스터</td><td><strong>HDBSCAN</strong></td><td>자동</td><td>min_cluster_size: 50</td></tr>
+      <tr><td>스펙트럼 분포가 겹치거나 크기가 다른 클래스</td><td><strong>GMM</strong></td><td>6</td><td>covariance_type: full</td></tr>
+      <tr><td>혼합 픽셀 / 스펙트럼 언믹싱 분석</td><td><strong>NMF</strong></td><td>6</td><td>max_iter: 500</td></tr>
       <tr><td>PyTorch 설치 후 딥러닝 시도</td><td><strong>Autoencoder</strong></td><td>6</td><td>Epochs: 60</td></tr>
-      <tr><td>방법 간 결과 비교</td><td><strong>4가지 모두</strong></td><td>—</td><td>단일 파일 모드, 같은 이미지</td></tr>
+      <tr><td>방법 간 결과 비교</td><td><strong>7가지 모두</strong></td><td>—</td><td>단일 파일 모드, 같은 이미지</td></tr>
     </tbody>
   </table>
   </div>
@@ -1381,13 +1423,13 @@ cd Extract_spectra</pre>
       </ul>
     </div>
     <div class="qr-card">
-      <h4>spectra.csv 사용법</h4>
+      <h4>spectra_{방법}.csv 사용법</h4>
       <ul>
-        <li>Python: <code>pd.read_csv("spectra.csv")</code></li>
-        <li>R: <code>read.csv("spectra.csv")</code></li>
+        <li>Python: <code>pd.read_csv("spectra_kmeans.csv")</code></li>
+        <li>R: <code>read.csv("spectra_hybrid.csv")</code></li>
         <li>Excel: 파일 → 직접 열기</li>
         <li>행 = 스펙트럼 밴드</li>
-        <li>열 = 클래스 평균 / 표준편차</li>
+        <li>클래스별 7개 통계: mean, std, median, q25, q75, mna, sam_avg</li>
       </ul>
     </div>
     <div class="qr-card">
