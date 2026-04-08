@@ -118,8 +118,22 @@ class SpectrumExtractor:
         self,
         spectra: List[Dict[str, Any]],
         path: str | Path,
+        file_stem: Optional[str] = None,
     ) -> None:
         """Save spectra to a wide-format CSV file.
+
+        Column naming
+        -------------
+        If *file_stem* is provided, every column is prefixed with it so
+        that CSVs from different image files can be merged without column
+        name collisions::
+
+            AP3-4_Sunlit_Leaves_mean
+            AP3-4_Sunlit_Leaves_sam_avg
+            AP3-5_Sunlit_Leaves_mean
+            ...
+
+        Without *file_stem* the prefix is omitted (backward-compatible).
 
         Column order per class:
           mean, std, median, q25, q75, mna, sam_avg
@@ -141,21 +155,24 @@ class SpectrumExtractor:
             index_col  = list(range(n_bands))
             index_name = "band_index"
 
+        prefix = f"{file_stem}_" if file_stem else ""
+
         rows = {}
         for s in spectra:
-            name = s["name"].replace(" ", "_")
-            rows[f"{name}_mean"]    = s["mean"]
-            rows[f"{name}_std"]     = s["std"]
-            rows[f"{name}_median"]  = s["median"]
-            rows[f"{name}_q25"]     = s["q25"]
-            rows[f"{name}_q75"]     = s["q75"]
-            rows[f"{name}_mna"]     = s["mna"]
-            rows[f"{name}_sam_avg"] = s["sam_avg"]
+            cls = s["name"].replace(" ", "_")
+            tag = f"{prefix}{cls}"
+            rows[f"{tag}_mean"]    = s["mean"]
+            rows[f"{tag}_std"]     = s["std"]
+            rows[f"{tag}_median"]  = s["median"]
+            rows[f"{tag}_q25"]     = s["q25"]
+            rows[f"{tag}_q75"]     = s["q75"]
+            rows[f"{tag}_mna"]     = s["mna"]
+            rows[f"{tag}_sam_avg"] = s["sam_avg"]
 
         df = pd.DataFrame(rows, index=index_col)
         df.index.name = index_name
         df.to_csv(path)
-        logger.info(f"  Spectra CSV saved: {path}")
+        logger.info(f"  Spectra CSV saved: {path}  (prefix='{prefix or 'none'}')")
 
     # ============================================================
     # Private

@@ -222,7 +222,8 @@ class Pipeline:
         file_out_dir.mkdir(parents=True, exist_ok=True)
 
         if out_cfg.get("save_spectra_csv", True):
-            self.extr.save_csv(spectra, file_out_dir / "spectra.csv")
+            self.extr.save_csv(spectra, file_out_dir / "spectra.csv",
+                               file_stem=stem)
 
         if out_cfg.get("save_classification_map", True):
             self._save_class_map(class_map, class_info, file_out_dir / "class_map.png")
