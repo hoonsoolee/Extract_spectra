@@ -1,0 +1,1420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hyperspectral Crop Analysis — User Manual</title>
+<style>
+/* ── Reset & Base ─────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: 'Segoe UI', Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.7;
+  color: #222;
+  background: #f4f6f8;
+}
+
+/* ── Layout ───────────────────────────────────────────────────── */
+.page-wrap {
+  display: flex;
+  max-width: 1300px;
+  margin: 0 auto;
+  padding: 32px 24px;
+  gap: 32px;
+}
+
+/* ── Sidebar / TOC ────────────────────────────────────────────── */
+.toc-sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 24px;
+  align-self: flex-start;
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 12px rgba(0,0,0,.08);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+}
+.toc-sidebar h3 {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #888;
+  margin-bottom: 14px;
+}
+.toc-sidebar ul { list-style: none; }
+.toc-sidebar li { margin: 2px 0; }
+.toc-sidebar a {
+  display: block;
+  padding: 4px 8px;
+  border-radius: 6px;
+  color: #444;
+  text-decoration: none;
+  font-size: 13px;
+  transition: background .15s, color .15s;
+}
+.toc-sidebar a:hover { background: #eaf4ef; color: #2e7d62; }
+.toc-sidebar .toc-sub a {
+  padding-left: 20px;
+  font-size: 12px;
+  color: #666;
+}
+.toc-sidebar .toc-active a { color: #2e7d62; font-weight: 600; background: #eaf4ef; }
+
+/* ── Main Content ─────────────────────────────────────────────── */
+.content { flex: 1; min-width: 0; }
+
+/* ── Cover ────────────────────────────────────────────────────── */
+.cover {
+  background: linear-gradient(135deg, #1a3a5c 0%, #2e7d62 100%);
+  border-radius: 16px;
+  padding: 56px 48px;
+  color: #fff;
+  margin-bottom: 32px;
+}
+.cover .badge {
+  display: inline-block;
+  background: rgba(255,255,255,.15);
+  color: #a8d8c8;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 4px 12px;
+  border-radius: 20px;
+  margin-bottom: 20px;
+}
+.cover h1 { font-size: 36px; font-weight: 800; line-height: 1.2; margin-bottom: 8px; }
+.cover .subtitle { font-size: 18px; color: #a8d8c8; margin-bottom: 24px; }
+.cover .desc {
+  font-size: 15px;
+  color: rgba(255,255,255,.82);
+  max-width: 680px;
+  line-height: 1.75;
+  margin-bottom: 32px;
+}
+.cover .feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+.cover .feature-pill {
+  background: rgba(255,255,255,.12);
+  border: 1px solid rgba(255,255,255,.2);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  color: #d4eee6;
+}
+.cover .meta {
+  margin-top: 28px;
+  font-size: 13px;
+  color: rgba(255,255,255,.55);
+  border-top: 1px solid rgba(255,255,255,.15);
+  padding-top: 18px;
+}
+.cover .meta a { color: #a8d8c8; }
+
+/* ── Section Cards ────────────────────────────────────────────── */
+.section {
+  background: #fff;
+  border-radius: 12px;
+  padding: 36px 40px;
+  margin-bottom: 24px;
+  box-shadow: 0 2px 10px rgba(0,0,0,.06);
+}
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 2px solid #eef;
+}
+.section-num {
+  background: #1a3a5c;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.section-header h2 { font-size: 22px; color: #1a3a5c; font-weight: 700; }
+.section-header .section-sub { font-size: 14px; color: #888; margin-top: 2px; }
+
+h3 {
+  font-size: 16px;
+  color: #2e7d62;
+  font-weight: 700;
+  margin: 28px 0 10px;
+  padding-left: 10px;
+  border-left: 3px solid #2e7d62;
+}
+h4 { font-size: 14px; color: #1a3a5c; font-weight: 700; margin: 20px 0 8px; }
+p { margin-bottom: 12px; color: #333; }
+
+/* ── Tables ───────────────────────────────────────────────────── */
+.tbl-wrap { overflow-x: auto; margin: 16px 0; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+thead th {
+  background: #1a3a5c;
+  color: #fff;
+  padding: 11px 14px;
+  text-align: left;
+  font-weight: 600;
+  font-size: 13px;
+}
+tbody td {
+  padding: 10px 14px;
+  border-bottom: 1px solid #f0f0f0;
+  vertical-align: top;
+}
+tbody tr:nth-child(even) td { background: #f8fbfa; }
+tbody tr:hover td { background: #eaf4ef; }
+
+/* ── Code blocks ──────────────────────────────────────────────── */
+pre, code {
+  font-family: 'Cascadia Code', 'Consolas', 'Courier New', monospace;
+}
+pre {
+  background: #1e2433;
+  color: #d4e0f0;
+  padding: 18px 22px;
+  border-radius: 10px;
+  margin: 14px 0;
+  overflow-x: auto;
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+code {
+  background: #eef2f7;
+  color: #c0392b;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+pre code { background: none; color: inherit; padding: 0; }
+
+/* ── Callout boxes ────────────────────────────────────────────── */
+.callout {
+  border-radius: 10px;
+  padding: 16px 20px;
+  margin: 16px 0;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.callout-icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+.callout-body { font-size: 14px; line-height: 1.65; }
+.callout-body strong { display: block; margin-bottom: 3px; font-size: 13px; text-transform: uppercase; letter-spacing: .5px; }
+.tip   { background: #eaf4ef; border-left: 4px solid #2e7d62; }
+.tip   .callout-body strong { color: #2e7d62; }
+.warn  { background: #fff8e6; border-left: 4px solid #e67e22; }
+.warn  .callout-body strong { color: #e67e22; }
+.info  { background: #e8f0fb; border-left: 4px solid #2980b9; }
+.info  .callout-body strong { color: #2980b9; }
+
+/* ── Method cards ─────────────────────────────────────────────── */
+.method-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+  margin: 16px 0;
+}
+.method-card {
+  border: 1.5px solid #e0e8f0;
+  border-radius: 12px;
+  padding: 20px;
+  transition: box-shadow .2s, border-color .2s;
+}
+.method-card:hover { box-shadow: 0 4px 18px rgba(0,0,0,.1); border-color: #2e7d62; }
+.method-card .mc-tag {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .8px;
+  padding: 3px 9px;
+  border-radius: 12px;
+  margin-bottom: 10px;
+}
+.tag-recommended { background: #d4edda; color: #1a7a3a; }
+.tag-general     { background: #dce8f7; color: #1a4a8a; }
+.tag-lighting    { background: #fde8cc; color: #b05a00; }
+.tag-dl          { background: #ecddf7; color: #6a1b9a; }
+.method-card h4  { font-size: 15px; margin: 0 0 8px; color: #1a3a5c; }
+.method-card p   { font-size: 13px; color: #555; margin: 0; }
+
+/* ── Pipeline steps ───────────────────────────────────────────── */
+.pipeline {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  margin: 20px 0;
+  flex-wrap: wrap;
+}
+.pipe-step {
+  flex: 1;
+  min-width: 140px;
+  background: #f0f6f4;
+  border: 1.5px solid #b8d8cc;
+  border-radius: 10px;
+  padding: 16px 14px;
+  text-align: center;
+  position: relative;
+}
+.pipe-step .ps-num {
+  background: #2e7d62;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+.pipe-step .ps-title { font-size: 13px; font-weight: 700; color: #1a3a5c; margin-bottom: 5px; }
+.pipe-step .ps-desc  { font-size: 12px; color: #555; line-height: 1.5; }
+.pipe-arrow {
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  color: #aaa;
+  font-size: 22px;
+  flex-shrink: 0;
+}
+
+/* ── Parameter table highlight ────────────────────────────────── */
+.param-name { font-weight: 700; color: #1a3a5c; }
+.param-default { font-family: monospace; background: #eef2f7; padding: 1px 6px; border-radius: 4px; font-size: 13px; }
+.range { color: #888; font-size: 13px; }
+
+/* ── Two-column layout ─────────────────────────────────────────── */
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 16px 0; }
+@media (max-width: 760px) { .two-col { grid-template-columns: 1fr; } }
+
+/* ── Option boxes ─────────────────────────────────────────────── */
+.option-box {
+  border: 1.5px solid #2e7d62;
+  border-radius: 10px;
+  padding: 18px 20px;
+}
+.option-box.secondary { border-color: #1a3a5c; }
+.option-box h4 { color: #2e7d62; margin-top: 0; }
+.option-box.secondary h4 { color: #1a3a5c; }
+.option-box ol, .option-box ul { padding-left: 18px; font-size: 14px; }
+.option-box li { margin-bottom: 5px; }
+
+/* ── Steps list ───────────────────────────────────────────────── */
+.steps { counter-reset: step; list-style: none; padding: 0; }
+.steps li {
+  counter-increment: step;
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+.steps li::before {
+  content: counter(step);
+  background: #1a3a5c;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.steps li p { margin: 0; font-size: 14px; }
+
+/* ── Quality gauge visual ─────────────────────────────────────── */
+.gauge-bar {
+  height: 16px;
+  border-radius: 8px;
+  background: linear-gradient(to right, #e74c3c 0%, #f39c12 25%, #2980b9 55%, #27ae60 80%);
+  position: relative;
+  margin: 8px 0 4px;
+}
+.gauge-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #888;
+  margin-bottom: 12px;
+}
+
+/* ── File tree ────────────────────────────────────────────────── */
+.file-tree {
+  background: #1e2433;
+  color: #d4e0f0;
+  border-radius: 10px;
+  padding: 20px 24px;
+  font-family: monospace;
+  font-size: 14px;
+  line-height: 2;
+}
+.file-tree .dir  { color: #a8d8c8; font-weight: 700; }
+.file-tree .file { color: #f8c97d; }
+.file-tree .comment { color: #6a7f9a; }
+
+/* ── Quick ref card ───────────────────────────────────────────── */
+.qr-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+  margin: 16px 0;
+}
+.qr-card {
+  background: #f7faf9;
+  border: 1px solid #d0e8dc;
+  border-radius: 10px;
+  padding: 16px 18px;
+}
+.qr-card h4 { color: #2e7d62; font-size: 14px; margin: 0 0 10px; }
+.qr-card ul { padding-left: 16px; font-size: 13px; color: #444; }
+.qr-card li { margin-bottom: 4px; }
+
+/* ── Print styles ─────────────────────────────────────────────── */
+@media print {
+  body { background: white; font-size: 12px; }
+  .toc-sidebar { display: none; }
+  .page-wrap { display: block; padding: 0; }
+  .section { box-shadow: none; border: 1px solid #ddd; page-break-inside: avoid; margin-bottom: 16px; padding: 24px; }
+  .cover { page-break-after: always; }
+  pre { font-size: 11px; }
+  a { color: inherit; text-decoration: none; }
+}
+</style>
+</head>
+<body>
+
+<div class="page-wrap">
+
+<!-- ══════════════════════ SIDEBAR TOC ══════════════════════════ -->
+<nav class="toc-sidebar">
+  <h3>Contents</h3>
+  <ul>
+    <li><a href="#cover">Overview</a></li>
+    <li><a href="#s1">1. Installation</a></li>
+    <li><a href="#s2">2. Starting the App</a></li>
+    <li><a href="#s3">3. Data Source</a></li>
+    <li><a href="#s4">4. Processing Mode</a></li>
+    <li><a href="#s5">5. Classification Methods</a></li>
+    <li class="toc-sub"><ul>
+      <li><a href="#s5-hybrid">5.1 Hybrid</a></li>
+      <li><a href="#s5-kmeans">5.2 K-Means</a></li>
+      <li><a href="#s5-sam">5.3 SAM</a></li>
+      <li><a href="#s5-ae">5.4 Autoencoder</a></li>
+    </ul></li>
+    <li><a href="#s6">6. Number of Classes</a></li>
+    <li><a href="#s7">7. Output Settings</a></li>
+    <li><a href="#s8">8. Running the Analysis</a></li>
+    <li><a href="#s9">9. HTML Report</a></li>
+    <li class="toc-sub"><ul>
+      <li><a href="#s9-overview">9.1 Image Overview</a></li>
+      <li><a href="#s9-perclass">9.2 Per-Class Images</a></li>
+      <li><a href="#s9-summary">9.3 Summary Table</a></li>
+      <li><a href="#s9-spectra">9.4 Spectra Chart</a></li>
+      <li><a href="#s9-quality">9.5 Quality Assessment</a></li>
+      <li><a href="#s9-veg">9.6 Vegetation Separation</a></li>
+    </ul></li>
+    <li><a href="#s10">10. Output Files</a></li>
+    <li><a href="#s11">11. Troubleshooting</a></li>
+    <li><a href="#s12">12. Quick Reference</a></li>
+  </ul>
+</nav>
+
+<!-- ══════════════════════ MAIN CONTENT ═════════════════════════ -->
+<main class="content">
+
+<!-- COVER -->
+<div class="cover" id="cover">
+  <div class="badge">User Manual</div>
+  <h1>Hyperspectral Field Crop<br>Analysis Tool</h1>
+  <p class="subtitle">Unsupervised Edition — No Labels Required</p>
+  <p class="desc">
+    This tool automatically classifies pixels in hyperspectral field crop images
+    and extracts per-class reflectance spectra. It runs entirely on your local
+    machine — no cloud, no internet, no labelled training data required.
+    Results are saved as a CSV file and a fully interactive HTML report.
+  </p>
+  <div class="feature-grid">
+    <div class="feature-pill">&#x1F331; Hybrid (NDVI + K-means)</div>
+    <div class="feature-pill">&#x1F4CA; K-Means Clustering</div>
+    <div class="feature-pill">&#x1F4D0; Spectral Angle Mapping</div>
+    <div class="feature-pill">&#x1F916; Autoencoder (Deep Learning)</div>
+    <div class="feature-pill">&#x1F4C4; Interactive HTML Report</div>
+    <div class="feature-pill">&#x1F4C8; Per-Class Spectra CSV</div>
+  </div>
+  <div class="meta">
+    GitHub: <a href="https://github.com/hoonsoolee/Extract_spectra">https://github.com/hoonsoolee/Extract_spectra</a>
+    &nbsp;&nbsp;|&nbsp;&nbsp; Python 3.9+ &nbsp;|&nbsp; Runs on CPU &nbsp;|&nbsp; Windows / macOS / Linux
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- SECTION 1 — INSTALLATION -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<div class="section" id="s1">
+  <div class="section-header">
+    <div class="section-num">1</div>
+    <div>
+      <h2>Installation</h2>
+      <div class="section-sub">One-time setup — takes about 5 minutes</div>
+    </div>
+  </div>
+
+  <h3>Requirements</h3>
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th>Requirement</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Python 3.9 or later</strong></td><td>Download from <code>python.org</code>. During installation on Windows, check "Add Python to PATH".</td></tr>
+      <tr><td><strong>Git</strong></td><td>Download from <code>git-scm.com</code>. Used to download the tool from GitHub.</td></tr>
+      <tr><td><strong>8 GB RAM</strong></td><td>Recommended minimum. Larger images (2000×2000 px+) may need 16 GB.</td></tr>
+      <tr><td><strong>PyTorch</strong> (optional)</td><td>Required only for the Autoencoder method. See Step 3 below.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Installation Steps</h3>
+  <ol class="steps">
+    <li><p><strong>Open a terminal</strong> (Windows: press <code>Win+R</code>, type <code>cmd</code>; Mac/Linux: open Terminal).</p></li>
+    <li><p><strong>Download the tool</strong> from GitHub:</p>
+      <pre>git clone https://github.com/hoonsoolee/Extract_spectra.git
+cd Extract_spectra</pre>
+    </li>
+    <li><p><strong>Install all required Python packages</strong> at once:</p>
+      <pre>pip install -r requirements.txt</pre>
+    </li>
+    <li><p><strong>(Optional) Install PyTorch</strong> — only needed for the Autoencoder method:</p>
+      <pre>pip install torch</pre>
+    </li>
+    <li><p><strong>Verify the installation</strong> by starting the app:</p>
+      <pre>python -m streamlit run app_unsupervised.py</pre>
+      <p>Your browser should open automatically at <code>http://localhost:8501</code>.</p>
+    </li>
+  </ol>
+
+  <h3>Supported File Formats</h3>
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th>Format</th><th>Extension</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><strong>ENVI</strong></td><td><code>.hdr</code></td><td>The <code>.hdr</code> header file and its matching data file (<code>.raw</code> / <code>.bil</code> / <code>.bip</code> / <code>.bsq</code>) must be in the <strong>same folder</strong>.</td></tr>
+      <tr><td><strong>GeoTIFF</strong></td><td><code>.tif</code> / <code>.tiff</code></td><td>Standard geospatial raster. Multi-band TIFFs are supported.</td></tr>
+      <tr><td><strong>HDF5</strong></td><td><code>.h5</code> / <code>.hdf5</code></td><td>Common in remote sensing datasets.</td></tr>
+      <tr><td><strong>MATLAB</strong></td><td><code>.mat</code></td><td>MATLAB data files. The first 3-D array found is used.</td></tr>
+    </tbody>
+  </table>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- SECTION 2 — STARTING THE APP -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<div class="section" id="s2">
+  <div class="section-header">
+    <div class="section-num">2</div>
+    <div>
+      <h2>Starting the Application</h2>
+      <div class="section-sub">Launch the web interface</div>
+    </div>
+  </div>
+
+  <h3>Launch Commands</h3>
+  <div class="two-col">
+    <div class="option-box">
+      <h4>Unsupervised Edition <em>(recommended)</em></h4>
+      <pre>python -m streamlit run app_unsupervised.py</pre>
+      <p style="font-size:13px;margin:0;color:#555;">Hybrid &middot; K-Means &middot; SAM &middot; Autoencoder<br>No labels required for any method.</p>
+    </div>
+    <div class="option-box secondary">
+      <h4>Full Edition</h4>
+      <pre>python -m streamlit run app_en.py</pre>
+      <p style="font-size:13px;margin:0;color:#555;">All methods including Random Forest and 1D-CNN.<br>Supervised methods require a labelled CSV file.</p>
+    </div>
+  </div>
+
+  <div class="callout tip">
+    <div class="callout-icon">&#x1F4A1;</div>
+    <div class="callout-body">
+      <strong>Tip</strong>
+      If the browser does not open automatically, go to <code>http://localhost:8501</code> manually.
+      If port 8501 is already in use, run with <code>--server.port 8502</code>.
+    </div>
+  </div>
+
+  <h3>Interface Layout</h3>
+  <p>The application has two areas:</p>
+
+  <div class="two-col">
+    <div style="background:#f0f6f4;border:1.5px solid #2e7d62;border-radius:10px;padding:18px;">
+      <h4 style="color:#2e7d62;margin-top:0;">LEFT SIDEBAR — Settings</h4>
+      <ul style="font-size:13px;padding-left:16px;color:#444;">
+        <li>&#x1F4C2; Data Source</li>
+        <li>&#x1F3AF; Processing Mode</li>
+        <li>&#x1F9EC; Classification Method</li>
+        <li>&#x1F522; Number of Classes</li>
+        <li>&#x1F527; Method Parameters</li>
+        <li>&#x1F4C1; Output Settings</li>
+        <li style="margin-top:8px;"><strong>&#x1F680; Run Analysis button</strong></li>
+      </ul>
+    </div>
+    <div style="background:#f0f4f8;border:1.5px solid #1a3a5c;border-radius:10px;padding:18px;">
+      <h4 style="color:#1a3a5c;margin-top:0;">MAIN AREA — Results</h4>
+      <ul style="font-size:13px;padding-left:16px;color:#444;">
+        <li>Configuration summary card</li>
+        <li>After run completes:</li>
+        <li style="list-style:none;padding-left:12px;">&#x2714; Success banner + elapsed time</li>
+        <li style="list-style:none;padding-left:12px;">&#x2714; HTML report file path</li>
+        <li style="list-style:none;padding-left:12px;">&#x2714; Classification map preview</li>
+        <li style="list-style:none;padding-left:12px;">&#x2714; Run log (collapsible)</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3>Placing Your Data</h3>
+  <p>Create a folder anywhere on your computer (e.g. <code>C:/data/hyperspectral</code> or <code>./data</code>) and copy your image files into it. Subfolders are supported — the tool scans recursively.</p>
+  <p>For ENVI files: make sure the <code>.hdr</code> file and its data file (<code>.raw</code>, <code>.bil</code>, etc.) share the same base filename and are in the same folder.</p>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- SECTION 3 — DATA SOURCE -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<div class="section" id="s3">
+  <div class="section-header">
+    <div class="section-num">3</div>
+    <div>
+      <h2>Data Source</h2>
+      <div class="section-sub">Tell the tool where your image files are located</div>
+    </div>
+  </div>
+
+  <p>The <strong>Data Source</strong> section is the first setting in the sidebar. Use the radio buttons to choose between two options.</p>
+
+  <div class="two-col">
+    <div class="option-box">
+      <h4>Option A — Local Folder <span style="font-size:12px;color:#2e7d62;">(Recommended)</span></h4>
+      <ol style="padding-left:18px;font-size:14px;">
+        <li>Select <strong>Local Folder</strong> with the radio button.</li>
+        <li>Type the path to your data folder.<br>
+          <code>./data</code> &nbsp;or&nbsp; <code>C:/data/field_images</code></li>
+        <li>The tool scans that folder and all subfolders for supported files.</li>
+      </ol>
+    </div>
+    <div class="option-box secondary">
+      <h4>Option B — GitHub Repository</h4>
+      <ol style="padding-left:18px;font-size:14px;">
+        <li>Select <strong>GitHub Repository</strong>.</li>
+        <li>Repository: <code>owner/repo</code> format<br>(e.g. <code>mylab/crop_images</code>)</li>
+        <li>Sub-folder: path inside the repo (optional).</li>
+        <li>GitHub Token: required for <strong>private repos only</strong>.<br>
+          Generate at <code>github.com/settings/tokens</code> with <code>repo</code> scope.</li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="callout tip">
+    <div class="callout-icon">&#x1F4A1;</div>
+    <div class="callout-body">
+      <strong>First-time users</strong>
+      Put a single test image in the <code>./data</code> folder and use Local Folder mode. This is the quickest way to verify everything is working before processing a full dataset.
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- SECTION 4 — PROCESSING MODE -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<div class="section" id="s4">
+  <div class="section-header">
+    <div class="section-num">4</div>
+    <div>
+      <h2>Processing Mode</h2>
+      <div class="section-sub">Process one file or the entire folder</div>
+    </div>
+  </div>
+
+  <p>Appears directly below Data Source in the sidebar. Controls how many files are processed in a single run.</p>
+
+  <div class="two-col">
+    <div class="option-box">
+      <h4>&#x1F50D; Single File Mode</h4>
+      <p style="font-size:13px;color:#666;font-style:italic;">Best for: checking one image, tuning parameters before a full batch run.</p>
+      <ol style="padding-left:18px;font-size:14px;">
+        <li>Select <strong>Single File</strong>.</li>
+        <li>Click <strong>Scan Folder</strong>.<br>
+          The tool lists all supported files in your data folder.</li>
+        <li>Select the file you want from the dropdown.</li>
+        <li>Click <strong>Run Analysis</strong>.</li>
+        <li>Results saved to <code>output/&lt;filename&gt;/</code></li>
+      </ol>
+    </div>
+    <div class="option-box secondary">
+      <h4>&#x1F4E6; Batch Mode (all files)</h4>
+      <p style="font-size:13px;color:#666;font-style:italic;">Best for: processing an entire dataset; each file gets its own report.</p>
+      <ol style="padding-left:18px;font-size:14px;">
+        <li>Select <strong>Batch (all files)</strong>.</li>
+        <li>Click <strong>Run Analysis</strong>.<br>
+          All supported files are processed in alphabetical order.</li>
+        <li>Each file gets its own subfolder and HTML report.</li>
+        <li>All report paths are listed when complete.</li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="callout info">
+    <div class="callout-icon">&#x23F1;</div>
+    <div class="callout-body">
+      <strong>Estimating Batch Time</strong>
+      Run Single File mode on one image first. The elapsed time shown in the success banner is a reliable estimate of per-file processing time.
+      Total batch time &asymp; single-file time &times; number of files.
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- SECTION 5 — CLASSIFICATION METHODS -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<div class="section" id="s5">
+  <div class="section-header">
+    <div class="section-num">5</div>
+    <div>
+      <h2>Classification Methods</h2>
+      <div class="section-sub">How the algorithm groups pixels into classes — no labels needed</div>
+    </div>
+  </div>
+
+  <p>All four methods are <strong>fully unsupervised</strong> — they discover natural spectral groupings automatically. Choose based on your image type and analysis goal.</p>
+
+  <div class="method-grid">
+    <div class="method-card">
+      <span class="mc-tag tag-recommended">Recommended</span>
+      <h4>Hybrid (NDVI + Brightness + K-means)</h4>
+      <p>Uses vegetation physics first, then statistical clustering. Best for standard field crop images with NIR coverage.</p>
+    </div>
+    <div class="method-card">
+      <span class="mc-tag tag-general">General Purpose</span>
+      <h4>K-Means</h4>
+      <p>Pure data-driven clustering. Works on any image regardless of spectral range. No vegetation index required.</p>
+    </div>
+    <div class="method-card">
+      <span class="mc-tag tag-lighting">Lighting Invariant</span>
+      <h4>SAM — Spectral Angle Mapping</h4>
+      <p>Compares the shape of spectra, not their brightness. Best for images with strong shadows or uneven lighting.</p>
+    </div>
+    <div class="method-card">
+      <span class="mc-tag tag-dl">Deep Learning</span>
+      <h4>Autoencoder</h4>
+      <p>Neural network learns compressed spectral features, then clusters them. Requires PyTorch. Slowest but most flexible.</p>
+    </div>
+  </div>
+
+  <!-- ── 5.1 HYBRID ── -->
+  <h3 id="s5-hybrid">5.1 Hybrid — Recommended Default</h3>
+
+  <p>The Hybrid method combines three techniques in sequence. It is the recommended starting point because it leverages well-established vegetation physics rather than relying purely on statistical grouping.</p>
+
+  <div class="pipeline">
+    <div class="pipe-step">
+      <div class="ps-num">1</div>
+      <div class="ps-title">NDVI Mask</div>
+      <div class="ps-desc">NDVI = (NIR &minus; Red) / (NIR + Red)<br>Pixels above threshold &rarr; Vegetation<br>Others &rarr; Non-vegetation</div>
+    </div>
+    <div class="pipe-arrow">&#x2192;</div>
+    <div class="pipe-step">
+      <div class="ps-num">2</div>
+      <div class="ps-title">Brightness Mask</div>
+      <div class="ps-desc">Within vegetation pixels:<br>Low mean reflectance &rarr; Shadow<br>High reflectance &rarr; Sunlit</div>
+    </div>
+    <div class="pipe-arrow">&#x2192;</div>
+    <div class="pipe-step">
+      <div class="ps-num">3</div>
+      <div class="ps-title">K-Means Refinement</div>
+      <div class="ps-desc">Within each segment, K-means finds finer sub-classes (e.g. different crop varieties or soil types)</div>
+    </div>
+  </div>
+
+  <h4>Parameters</h4>
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th>Parameter</th><th>Default</th><th>Range</th><th>What it controls</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="param-name">NDVI Threshold</td>
+        <td><span class="param-default">0.15</span></td>
+        <td class="range">0.05 – 0.30</td>
+        <td>Pixels with NDVI &ge; this value are classified as vegetation (leaves). <br>
+          <span style="color:#27ae60;">&#x2191; Increase</span> if non-plant pixels are incorrectly included in leaf classes.<br>
+          <span style="color:#e74c3c;">&#x2193; Decrease</span> if too few leaf pixels are being detected (stressed/senescent crops).</td>
+      </tr>
+      <tr>
+        <td class="param-name">Brightness Threshold</td>
+        <td><span class="param-default">0.08</span></td>
+        <td class="range">0.03 – 0.20</td>
+        <td>Within vegetation pixels, those with mean reflectance below this value are classified as shadow.<br>
+          <span style="color:#27ae60;">&#x2191; Increase</span> in strongly shaded images.<br>
+          <span style="color:#e74c3c;">&#x2193; Decrease</span> in bright or overcast conditions.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h4>Output Class IDs</h4>
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th>ID</th><th>Class Name</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr><td><strong>0</strong></td><td>Background</td><td>Non-vegetation, non-soil (paths, edges, sky)</td></tr>
+      <tr><td><strong>1</strong></td><td>Sunlit Leaves</td><td>Vegetation pixels in direct sunlight — high reflectance</td></tr>
+      <tr><td><strong>2</strong></td><td>Shadowed Leaves</td><td>Vegetation pixels in shadow — low reflectance</td></tr>
+      <tr><td><strong>3</strong></td><td>Soil</td><td>Bare soil and ground cover</td></tr>
+      <tr><td><strong>4</strong></td><td>Other</td><td>Unclassified pixels</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout tip">
+    <div class="callout-icon">&#x1F4A1;</div>
+    <div class="callout-body">
+      <strong>Tuning Workflow</strong>
+      Run once with default settings. Open the HTML report and look at the Per-Class Images section.
+      If a class clearly contains mixed pixel types, adjust the relevant threshold and re-run.
+      Usually 1–2 adjustments are enough.
+    </div>
+  </div>
+
+  <div class="callout warn">
+    <div class="callout-icon">&#x26A0;</div>
+    <div class="callout-body">
+      <strong>No NIR Band?</strong>
+      NDVI requires a Near-Infrared (~800 nm) and Red (~660 nm) band. If your image does not cover these wavelengths, the Hybrid method automatically falls back to K-Means. Switch to K-Means or SAM manually in that case.
+    </div>
+  </div>
+
+  <!-- ── 5.2 K-MEANS ── -->
+  <h3 id="s5-kmeans">5.2 K-Means</h3>
+
+  <p>A classic unsupervised clustering algorithm. Makes no assumptions about vegetation indices or spectral bands — it works purely from the statistical structure of the data.</p>
+
+  <h4>How it works</h4>
+  <ol class="steps">
+    <li><p><strong>PCA</strong> reduces the hundreds of spectral bands down to 15 principal components, capturing most of the variance while discarding noise.</p></li>
+    <li><p><strong>K-Means</strong> partitions the compressed spectral space into K clusters by iteratively minimising the distance from each pixel spectrum to its cluster centroid.</p></li>
+    <li><p>Each cluster becomes one output class. The classes are colour-coded but not named — you interpret them from the spectral chart in the report.</p></li>
+  </ol>
+
+  <h4>Parameter</h4>
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th>Parameter</th><th>Default</th><th>What it controls</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="param-name">Number of Classes</td>
+        <td><span class="param-default">6</span></td>
+        <td>How many clusters to find. More clusters = finer separation but harder to interpret. Start with 6 and adjust after reviewing the report.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout tip">
+    <div class="callout-icon">&#x1F4A1;</div>
+    <div class="callout-body">
+      <strong>When to use K-Means</strong>
+      Use K-Means when your image lacks NIR bands (making NDVI unavailable), when you want a purely data-driven result without any vegetation-index assumptions, or as a quick comparison baseline against Hybrid results.
+    </div>
+  </div>
+
+  <!-- ── 5.3 SAM ── -->
+  <h3 id="s5-sam">5.3 SAM — Spectral Angle Mapping</h3>
+
+  <p>SAM compares spectra by measuring the <strong>angle</strong> between spectral vectors rather than their Euclidean distance. This makes it insensitive to illumination intensity — a sunlit and a shadowed pixel of the same material will have a small angle, even though their absolute reflectance values differ significantly.</p>
+
+  <h4>How it works</h4>
+  <ol class="steps">
+    <li><p><strong>Endmember extraction:</strong> Representative spectra are automatically extracted from the image using PCA — no user-provided reference spectra needed.</p></li>
+    <li><p><strong>Angle comparison:</strong> Each pixel's spectrum is compared to every endmember. The spectral angle (in radians) is calculated — small angle = high similarity.</p></li>
+    <li><p><strong>Assignment:</strong> Each pixel is assigned to the class of the endmember with the smallest angle.</p></li>
+    <li><p><strong>Background threshold:</strong> If the smallest angle exceeds the angle threshold, the pixel is assigned to Background (class 0) — it does not sufficiently resemble any known class.</p></li>
+  </ol>
+
+  <h4>Parameters</h4>
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th>Parameter</th><th>Default</th><th>What it controls</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="param-name">Angle Threshold</td>
+        <td><span class="param-default">0.10 rad (~5.7°)</span></td>
+        <td>Maximum allowed angle between a pixel and its nearest endmember. Pixels exceeding this are assigned to Background.<br>
+        <span style="color:#27ae60;">&#x2191; Increase</span> if too many pixels are Background (threshold too strict).<br>
+        <span style="color:#e74c3c;">&#x2193; Decrease</span> for stricter matching.</td>
+      </tr>
+      <tr>
+        <td class="param-name">Number of Classes</td>
+        <td><span class="param-default">6</span></td>
+        <td>Number of endmembers (representative spectra) to extract and use as class prototypes.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout tip">
+    <div class="callout-icon">&#x1F4A1;</div>
+    <div class="callout-body">
+      <strong>When to use SAM</strong>
+      SAM is particularly useful for images with strong shadow gradients or varying illumination — such as images taken near sunrise/sunset, under partially cloudy conditions, or with topographic shading.
+    </div>
+  </div>
+
+  <!-- ── 5.4 AUTOENCODER ── -->
+  <h3 id="s5-ae">5.4 Autoencoder (Deep Learning)</h3>
+
+  <p>The Autoencoder uses a small neural network to learn a compressed representation of each pixel's spectrum. K-Means clustering is then applied in this learned space, which can capture non-linear spectral relationships that PCA (used by the K-Means method) might miss.</p>
+
+  <h4>How it works</h4>
+  <ol class="steps">
+    <li><p><strong>Encoder:</strong> An MLP compresses each spectrum (hundreds of bands) down to 16 latent dimensions.</p></li>
+    <li><p><strong>Decoder:</strong> Another MLP reconstructs the original spectrum from the 16-dimensional code. The network trains by minimising reconstruction error.</p></li>
+    <li><p><strong>Clustering:</strong> After training, K-Means clusters the 16-dim latent vectors to produce the final class assignments.</p></li>
+  </ol>
+
+  <h4>Parameters</h4>
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th>Parameter</th><th>Default</th><th>What it controls</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="param-name">Training Epochs</td>
+        <td><span class="param-default">60</span></td>
+        <td>Number of passes over the training data. More epochs = better compression, but longer runtime. Reduce to 20–30 for a quick test; increase to 100–150 for very complex images.</td>
+      </tr>
+      <tr>
+        <td class="param-name">Number of Classes</td>
+        <td><span class="param-default">6</span></td>
+        <td>Number of K-Means clusters applied to the latent space.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout warn">
+    <div class="callout-icon">&#x26A0;</div>
+    <div class="callout-body">
+      <strong>PyTorch Required</strong>
+      The Autoencoder method requires PyTorch. Install it with: <code>pip install torch</code><br>
+      If PyTorch is not installed, selecting Autoencoder will cause an error when you click Run.
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- SECTION 6 — NUMBER OF CLASSES -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<div class="section" id="s6">
+  <div class="section-header">
+    <div class="section-num">6</div>
+    <div>
+      <h2>Number of Classes</h2>
+      <div class="section-sub">How many groups to divide the image into</div>
+    </div>
+  </div>
+
+  <p>The slider controls how many output groups (clusters) the algorithm will create. The right value depends on the complexity of your scene.</p>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th>Value</th><th>When to use</th></tr></thead>
+    <tbody>
+      <tr><td><strong>2 – 3</strong></td><td>Very simple scenes: one crop type, uniform soil, minimal background variation.</td></tr>
+      <tr><td><strong>4 – 6</strong></td><td>Typical field images. <strong>Recommended starting range.</strong></td></tr>
+      <tr><td><strong>7 – 10</strong></td><td>Complex scenes: multiple crop varieties, varied soil moisture, deep shadow patches.</td></tr>
+      <tr><td><strong>11+</strong></td><td>Use only if you have a specific scientific reason. Results become hard to interpret.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout tip">
+    <div class="callout-icon">&#x1F4A1;</div>
+    <div class="callout-body">
+      <strong>How to pick the right number</strong>
+      Start with 6. Open the HTML report and look at the Per-Class Images. If two classes look visually identical (same spatial distribution, similar spectra), reduce the count. If one class clearly contains a mix of different materials, increase it.
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- SECTION 7 — OUTPUT SETTINGS -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<div class="section" id="s7">
+  <div class="section-header">
+    <div class="section-num">7</div>
+    <div>
+      <h2>Output Settings</h2>
+      <div class="section-sub">Configure where results are saved</div>
+    </div>
+  </div>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th>Setting</th><th>Default</th><th>Description</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="param-name">Output Folder</td>
+        <td><span class="param-default">./output</span></td>
+        <td>Path where all results are saved. A subfolder named after each image file is created automatically inside this folder. The folder is created if it does not exist.</td>
+      </tr>
+      <tr>
+        <td class="param-name">File Limit</td>
+        <td><span class="param-default">0 (= all)</span></td>
+        <td>Limits the number of files processed. Set to <code>1</code> or <code>2</code> during initial testing to save time. Set to <code>0</code> to process all files.</td>
+      </tr>
+      <tr>
+        <td class="param-name">Verbose Logging</td>
+        <td><span class="param-default">Off</span></td>
+        <td>Shows DEBUG-level messages in the run log, including per-step timing details. Leave off for normal use; enable only when diagnosing errors.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- SECTION 8 — RUNNING -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<div class="section" id="s8">
+  <div class="section-header">
+    <div class="section-num">8</div>
+    <div>
+      <h2>Running the Analysis</h2>
+      <div class="section-sub">Step-by-step from configuration to results</div>
+    </div>
+  </div>
+
+  <ol class="steps">
+    <li><p>Configure all settings in the sidebar: Data Source, Processing Mode, Method, Parameters, and Output Folder.</p></li>
+    <li><p>Click the blue <strong>"&#x1F680; Run Analysis"</strong> button at the bottom of the sidebar.</p></li>
+    <li><p>A spinner shows: <em>"Analysing… (may take several minutes for large images)"</em>. Do not close the browser tab while processing.</p></li>
+    <li><p>When done, a green banner appears: <code>&#x2705; Analysis complete! · ⏱ Xs</code>. The elapsed time helps you estimate full batch duration.</p></li>
+    <li><p>The HTML report path is displayed — click or copy it to open in your browser.</p></li>
+    <li><p>Classification map thumbnails appear as a quick preview.</p></li>
+    <li><p>The run log at the bottom of the page shows per-step timing and quality metrics.</p></li>
+  </ol>
+
+  <h3>Typical Processing Times</h3>
+  <p>Measured on a standard laptop CPU with a 500 &times; 500 px, 200-band image:</p>
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th>Method</th><th>Approx. Time</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Hybrid</strong></td><td>30 – 90 s</td><td>Depends on number of sub-clusters</td></tr>
+      <tr><td><strong>K-Means</strong></td><td>20 – 60 s</td><td>Fastest; no vegetation masking step</td></tr>
+      <tr><td><strong>SAM</strong></td><td>30 – 90 s</td><td>Similar to Hybrid</td></tr>
+      <tr><td><strong>Autoencoder</strong></td><td>3 – 10 min</td><td>Dominated by neural network training</td></tr>
+    </tbody>
+  </table>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- SECTION 9 — HTML REPORT -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<div class="section" id="s9">
+  <div class="section-header">
+    <div class="section-num">9</div>
+    <div>
+      <h2>Understanding the HTML Report</h2>
+      <div class="section-sub">A complete breakdown of every section in the output report</div>
+    </div>
+  </div>
+
+  <p>After each run, a file named <code>report_YYYYMMDD_HHMMSS.html</code> is saved in the output folder.
+  Open it in any browser (Chrome, Firefox, Edge, Safari). It is fully self-contained — no internet required.</p>
+
+  <!-- 9.1 -->
+  <h3 id="s9-overview">9.1 Image Overview</h3>
+  <p>The first card displays three side-by-side images:</p>
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th>Image</th><th>Bands used</th><th>What to look for</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>RGB Composite</strong></td>
+        <td>Red ~660 nm, Green ~550 nm, Blue ~450 nm</td>
+        <td>Natural-colour view of the field. Confirms the data loaded correctly and the scene looks as expected.</td>
+      </tr>
+      <tr>
+        <td><strong>CIR False-Color</strong></td>
+        <td>NIR ~800 nm &rarr; Red, Red &rarr; Green, Green &rarr; Blue</td>
+        <td>Healthy vegetation appears bright red/magenta. Use this to visually verify where vegetation is — it should align with the leaf classes in the classification map.</td>
+      </tr>
+      <tr>
+        <td><strong>Classification Map</strong></td>
+        <td>All bands (output of algorithm)</td>
+        <td>All classes shown at once in their assigned colours with a legend showing pixel count and percentage. First overall check of the classification result.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <!-- 9.2 -->
+  <h3 id="s9-perclass">9.2 Per-Class Classification Images</h3>
+  <p>One large image per class. The pixels belonging to that class are shown in the class colour; all other pixels are shown as a darkened greyscale background. This makes it easy to visually inspect each class in isolation.</p>
+
+  <div class="two-col">
+    <div style="background:#e8f5e9;border-left:4px solid #27ae60;padding:14px 16px;border-radius:0 8px 8px 0;">
+      <strong style="color:#27ae60;">Good classification:</strong>
+      <p style="margin:6px 0 0;font-size:13px;">The class pixels form a spatially coherent region — e.g. the entire leaf canopy, a contiguous patch of soil, or the shadowed side of rows.</p>
+    </div>
+    <div style="background:#fff3e0;border-left:4px solid #e67e22;padding:14px 16px;border-radius:0 8px 8px 0;">
+      <strong style="color:#e67e22;">Needs adjustment:</strong>
+      <p style="margin:6px 0 0;font-size:13px;">The class pixels are scattered randomly, or visually mix different materials (e.g. soil and leaves in the same class). Adjust parameters and re-run.</p>
+    </div>
+  </div>
+
+  <!-- 9.3 -->
+  <h3 id="s9-summary">9.3 Classification Summary Table</h3>
+  <p>A table listing each class with its pixel count, percentage of total image area, and a horizontal colour bar showing the proportion visually.</p>
+  <p>Check whether the distribution looks reasonable for your scene:
+  a dense canopy image should have large leaf classes; a sparse crop image will have more soil/background.</p>
+
+  <!-- 9.4 -->
+  <h3 id="s9-spectra">9.4 Reflectance Spectra Chart</h3>
+  <p>An interactive Plotly chart showing the mean reflectance spectrum for each class, plotted against wavelength (nm) or band index. The shaded band around each line is &plusmn;1 standard deviation, indicating spectral variability within the class.</p>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th>Interaction</th><th>How to do it</th></tr></thead>
+    <tbody>
+      <tr><td>See exact value at a wavelength</td><td>Hover the mouse over the chart</td></tr>
+      <tr><td>Show / hide a class</td><td>Click its name in the legend</td></tr>
+      <tr><td>Isolate one class</td><td>Double-click its name in the legend</td></tr>
+      <tr><td>Zoom in</td><td>Click and drag on the chart</td></tr>
+      <tr><td>Reset zoom</td><td>Double-click on the chart</td></tr>
+      <tr><td>Download as PNG</td><td>Hover chart &rarr; click the camera icon (top-right toolbar)</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout tip">
+    <div class="callout-icon">&#x1F4A1;</div>
+    <div class="callout-body">
+      <strong>Interpreting the spectra</strong>
+      Well-separated class spectra (clear vertical distance between lines across most wavelengths) indicate that the classes are spectrally distinct — a strong sign of good classification. If two classes have nearly identical spectra, consider merging them by reducing the number of classes.
+    </div>
+  </div>
+
+  <!-- 9.5 -->
+  <h3 id="s9-quality">9.5 Quality Assessment</h3>
+  <p>Two metrics are automatically calculated to quantify how well the clusters are separated in spectral space.</p>
+
+  <h4>Cluster Quality Score (Silhouette-based gauge)</h4>
+  <p>The Silhouette Score (range: &minus;1 to +1) measures how similar each pixel's spectrum is to its own class versus the nearest other class. It is converted to a 0–100% gauge for readability.</p>
+
+  <div class="gauge-bar"></div>
+  <div class="gauge-labels">
+    <span>0% — Poor</span>
+    <span>25%</span>
+    <span>50% — Fair</span>
+    <span>75% — Good</span>
+    <span>100% — Excellent</span>
+  </div>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th>Score</th><th>Rating</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><strong>90 – 100%</strong></td><td style="color:#27ae60;font-weight:700;">Excellent</td><td>Classes are very well separated in spectral space.</td></tr>
+      <tr><td><strong>75 – 90%</strong></td><td style="color:#2980b9;font-weight:700;">Good</td><td>Reliable classification for most scientific purposes.</td></tr>
+      <tr><td><strong>50 – 75%</strong></td><td style="color:#f39c12;font-weight:700;">Fair</td><td>Some class overlap. Consider adjusting parameters or trying a different method.</td></tr>
+      <tr><td><strong>Below 50%</strong></td><td style="color:#e74c3c;font-weight:700;">Poor</td><td>Significant overlap. Try a different method, change the number of classes, or adjust thresholds.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h4>Davies-Bouldin Index</h4>
+  <p>Measures the ratio of within-cluster scatter to between-cluster separation. Lower is better. Values below 1.0 are generally good; values above 2.0 suggest significant class overlap. Unlike the Silhouette Score, there is no universal "ideal" cutoff — it is most useful for comparing two runs of the same image.</p>
+
+  <!-- 9.6 -->
+  <h3 id="s9-veg">9.6 Vegetation Separation Assessment</h3>
+  <p>This section evaluates how accurately the algorithm identified vegetation pixels, using NDVI as an independent ground truth. It answers: <em>of all pixels that NDVI says are vegetation, how many were correctly labelled as leaves?</em></p>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th>Metric</th><th>Definition</th><th>How to interpret</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>Recall</strong></td>
+        <td>True positive rate</td>
+        <td>Of all pixels with NDVI &gt; 0.15, what fraction ended up in a leaf class?<br>
+          <span style="color:#e74c3c;">Low recall</span>: leaf pixels are being missed, placed in soil/background. &rarr; Lower the NDVI threshold.</td>
+      </tr>
+      <tr>
+        <td><strong>Precision</strong></td>
+        <td>Positive predictive value</td>
+        <td>Of all pixels placed in a leaf class, what fraction truly have NDVI &gt; 0.15?<br>
+          <span style="color:#e74c3c;">Low precision</span>: non-vegetation is being labelled as leaves. &rarr; Raise the NDVI threshold.</td>
+      </tr>
+      <tr>
+        <td><strong>F1 Score</strong></td>
+        <td>Harmonic mean of Recall &amp; Precision</td>
+        <td>A single combined score. Above 0.85 is excellent. Below 0.60 indicates significant misclassification of vegetation vs. non-vegetation.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout info">
+    <div class="callout-icon">&#x2139;</div>
+    <div class="callout-body">
+      <strong>Note</strong>
+      This metric is only shown for the Hybrid and K-Means methods, and only when the image contains NIR and Red bands for NDVI computation. If the section shows "No vegetation separation data available", your image may lack the required bands.
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- SECTION 10 — OUTPUT FILES -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<div class="section" id="s10">
+  <div class="section-header">
+    <div class="section-num">10</div>
+    <div>
+      <h2>Output Files</h2>
+      <div class="section-sub">What gets saved and how to use it</div>
+    </div>
+  </div>
+
+  <div class="file-tree">
+    <span class="dir">output/</span><br>
+    &nbsp;&nbsp;<span class="dir">+-- image_filename/</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- spectra.csv</span> &nbsp;<span class="comment">← per-class mean &amp; std reflectance spectra</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- class_map.png</span> &nbsp;<span class="comment">← classification map with colour legend</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- report_20240407_143022.html</span> &nbsp;<span class="comment">← full interactive HTML report</span>
+  </div>
+
+  <div class="tbl-wrap" style="margin-top:20px;">
+  <table>
+    <thead><tr><th>File</th><th>Contents</th><th>How to use</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>spectra.csv</code></td>
+        <td>One row per spectral band. Columns: wavelength (nm), mean reflectance per class, standard deviation per class.</td>
+        <td>Open in Excel, or load with <code>pandas.read_csv()</code> in Python or <code>read.csv()</code> in R for further spectral analysis.</td>
+      </tr>
+      <tr>
+        <td><code>class_map.png</code></td>
+        <td>Colour-coded classification map with a legend showing class names, pixel counts, and percentages.</td>
+        <td>Include directly in reports or presentations. No software needed to view.</td>
+      </tr>
+      <tr>
+        <td><code>report_*.html</code></td>
+        <td>Self-contained HTML file with all images, interactive charts, tables, and quality metrics.</td>
+        <td>Open in any web browser. No internet connection required. Use File &rarr; Print (Ctrl+P) to save as PDF.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- SECTION 11 — TROUBLESHOOTING -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<div class="section" id="s11">
+  <div class="section-header">
+    <div class="section-num">11</div>
+    <div>
+      <h2>Troubleshooting</h2>
+      <div class="section-sub">Common issues and how to fix them</div>
+    </div>
+  </div>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th>Problem</th><th>Cause</th><th>Solution</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>ModuleNotFoundError</code></td>
+        <td>A required Python package is not installed.</td>
+        <td>Run: <code>pip install -r requirements.txt</code><br>For Autoencoder: <code>pip install torch</code></td>
+      </tr>
+      <tr>
+        <td><code>Unsupported format</code> error</td>
+        <td>The file extension is not recognised.</td>
+        <td>Check the extension is <code>.hdr</code>, <code>.tif</code>, <code>.tiff</code>, <code>.h5</code>, <code>.hdf5</code>, or <code>.mat</code>.</td>
+      </tr>
+      <tr>
+        <td>ENVI file does not load</td>
+        <td>The <code>.hdr</code> and data file are in different folders or have different names.</td>
+        <td>Make sure the <code>.hdr</code> and its data file (<code>.raw</code> / <code>.bil</code> etc.) share the same base name and are in the same folder.</td>
+      </tr>
+      <tr>
+        <td>Classification map is mostly one colour</td>
+        <td>NDVI threshold is too high, or the wrong number of classes.</td>
+        <td>Lower the NDVI threshold (Hybrid) or try a different number of classes. Check the Quality Assessment score.</td>
+      </tr>
+      <tr>
+        <td>Too many Background pixels (SAM)</td>
+        <td>Angle threshold is too strict.</td>
+        <td>Increase the Angle Threshold (e.g. <code>0.10</code> &rarr; <code>0.20</code>).</td>
+      </tr>
+      <tr>
+        <td>Processing is very slow</td>
+        <td>Large image size or many epochs (Autoencoder).</td>
+        <td>Set <code>spatial_downsample: 2</code> in <code>config.yaml</code> to halve image dimensions. Reduce Autoencoder epochs to 20–30 for testing.</td>
+      </tr>
+      <tr>
+        <td>Browser does not open automatically</td>
+        <td>Browser launch failed silently.</td>
+        <td>Open <code>http://localhost:8501</code> manually.</td>
+      </tr>
+      <tr>
+        <td>Port 8501 already in use</td>
+        <td>Another Streamlit app is running on the same port.</td>
+        <td>Run: <code>python -m streamlit run app_unsupervised.py --server.port 8502</code></td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- SECTION 12 — QUICK REFERENCE -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<div class="section" id="s12">
+  <div class="section-header">
+    <div class="section-num">12</div>
+    <div>
+      <h2>Quick Reference</h2>
+      <div class="section-sub">At-a-glance guide for common decisions</div>
+    </div>
+  </div>
+
+  <h3>Which Method Should I Use?</h3>
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th>Your situation</th><th>Recommended method</th><th>Starting classes</th><th>Key parameter</th></tr></thead>
+    <tbody>
+      <tr><td>First time, standard crop image with NIR</td><td><strong>Hybrid</strong></td><td>6</td><td>Default settings</td></tr>
+      <tr><td>No NIR band in the image</td><td><strong>K-Means</strong></td><td>6</td><td>Default settings</td></tr>
+      <tr><td>Strong shadows / uneven lighting</td><td><strong>SAM</strong></td><td>6</td><td>Angle threshold: 0.15</td></tr>
+      <tr><td>Want deep learning features (PyTorch installed)</td><td><strong>Autoencoder</strong></td><td>6</td><td>Epochs: 60</td></tr>
+      <tr><td>Comparing methods</td><td><strong>All four</strong></td><td>—</td><td>Use Single File mode, same image</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Parameter Summary</h3>
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th>Parameter</th><th>Method</th><th>Default</th><th>Typical range</th><th>Controls</th></tr></thead>
+    <tbody>
+      <tr><td class="param-name">NDVI Threshold</td><td>Hybrid</td><td><span class="param-default">0.15</span></td><td>0.05 – 0.30</td><td>Vegetation sensitivity</td></tr>
+      <tr><td class="param-name">Brightness Threshold</td><td>Hybrid</td><td><span class="param-default">0.08</span></td><td>0.03 – 0.20</td><td>Shadow sensitivity</td></tr>
+      <tr><td class="param-name">Angle Threshold</td><td>SAM</td><td><span class="param-default">0.10 rad</span></td><td>0.05 – 0.30</td><td>Matching strictness</td></tr>
+      <tr><td class="param-name">Training Epochs</td><td>Autoencoder</td><td><span class="param-default">60</span></td><td>20 – 150</td><td>Neural network training depth</td></tr>
+      <tr><td class="param-name">Number of Classes</td><td>All</td><td><span class="param-default">6</span></td><td>2 – 20</td><td>Output cluster count</td></tr>
+      <tr><td class="param-name">File Limit</td><td>All</td><td><span class="param-default">0 (all)</span></td><td>1 – N</td><td>For quick testing</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Useful Tips</h3>
+  <div class="qr-grid">
+    <div class="qr-card">
+      <h4>Testing a new dataset</h4>
+      <ul>
+        <li>Set File Limit = 1</li>
+        <li>Use Single File mode</li>
+        <li>Run Hybrid with default settings</li>
+        <li>Check Per-Class Images first</li>
+        <li>Then adjust one parameter at a time</li>
+      </ul>
+    </div>
+    <div class="qr-card">
+      <h4>Improving poor results</h4>
+      <ul>
+        <li>Check Quality Score in report</li>
+        <li>Look at Per-Class Images</li>
+        <li>Try a different method</li>
+        <li>Adjust number of classes (+/-2)</li>
+        <li>Tune NDVI or Angle threshold</li>
+      </ul>
+    </div>
+    <div class="qr-card">
+      <h4>Using the spectra.csv</h4>
+      <ul>
+        <li>Python: <code>pd.read_csv("spectra.csv")</code></li>
+        <li>R: <code>read.csv("spectra.csv")</code></li>
+        <li>Excel: File &rarr; Open directly</li>
+        <li>Rows = spectral bands</li>
+        <li>Columns = class mean / std</li>
+      </ul>
+    </div>
+    <div class="qr-card">
+      <h4>Saving the report as PDF</h4>
+      <ul>
+        <li>Open the .html in Chrome</li>
+        <li>Press <code>Ctrl + P</code></li>
+        <li>Destination: "Save as PDF"</li>
+        <li>Disable headers/footers</li>
+        <li>Click Save</li>
+      </ul>
+    </div>
+  </div>
+
+  <div style="margin-top:32px;padding:20px;background:#f7faf9;border-radius:10px;text-align:center;border:1px solid #d0e8dc;">
+    <p style="font-size:14px;color:#555;margin:0;">
+      GitHub: <a href="https://github.com/hoonsoolee/Extract_spectra" style="color:#2e7d62;font-weight:600;">https://github.com/hoonsoolee/Extract_spectra</a>
+      &nbsp;&nbsp;|&nbsp;&nbsp; Runs entirely on CPU &nbsp;&nbsp;|&nbsp;&nbsp; Python 3.9+
+    </p>
+  </div>
+</div>
+
+</main>
+</div>
+
+<script>
+// Highlight active TOC link on scroll
+const sections = document.querySelectorAll('[id]');
+const links    = document.querySelectorAll('.toc-sidebar a');
+const obs = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      links.forEach(l => l.parentElement.classList.remove('toc-active'));
+      const active = document.querySelector(`.toc-sidebar a[href="#${e.target.id}"]`);
+      if (active) active.parentElement.classList.add('toc-active');
+    }
+  });
+}, { rootMargin: '0px 0px -60% 0px' });
+sections.forEach(s => obs.observe(s));
+</script>
+
+</body>
+</html>
