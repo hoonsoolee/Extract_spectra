@@ -107,9 +107,10 @@ class Pipeline:
                         and self.reporter.results:
                     stem         = Path(file_ref).stem
                     ts           = time.strftime("%Y%m%d_%H%M%S")
+                    method       = self.config.get("classification", {}).get("method", "unknown")
                     file_out_dir = self.output_dir / stem
                     file_out_dir.mkdir(parents=True, exist_ok=True)
-                    self.reporter.render(file_out_dir / f"report_{ts}.html")
+                    self.reporter.render(file_out_dir / f"report_{ts}_{method}.html")
                     self.reporter.results.clear()   # reset for next file
 
             except Exception as e:
@@ -128,14 +129,15 @@ class Pipeline:
         # • per_file_report   → already rendered above; nothing to do
         if not per_file_report and out_cfg.get("save_report", True) \
                 and self.reporter.results:
-            ts = time.strftime("%Y%m%d_%H%M%S")
+            ts     = time.strftime("%Y%m%d_%H%M%S")
+            method = self.config.get("classification", {}).get("method", "unknown")
             if single_file:
                 stem       = Path(single_file).stem
                 report_dir = self.output_dir / stem
                 report_dir.mkdir(parents=True, exist_ok=True)
-                report_path = report_dir / f"report_{ts}.html"
+                report_path = report_dir / f"report_{ts}_{method}.html"
             else:
-                report_path = self.output_dir / f"report_{ts}.html"
+                report_path = self.output_dir / f"report_{ts}_{method}.html"
             self.reporter.render(report_path)
 
     # ============================================================
@@ -218,15 +220,22 @@ class Pipeline:
 
         # ---- 5. Save outputs ----
         out_cfg = self.config.get("output", {})
+        method   = self.config.get("classification", {}).get("method", "unknown")
         file_out_dir = self.output_dir / stem
         file_out_dir.mkdir(parents=True, exist_ok=True)
 
         if out_cfg.get("save_spectra_csv", True):
-            self.extr.save_csv(spectra, file_out_dir / "spectra.csv",
-                               file_stem=stem)
+            csv_name = f"spectra_{method}.csv"
+            # Column prefix includes both image stem and method so merged
+            # CSVs from different files/methods never collide.
+            self.extr.save_csv(spectra, file_out_dir / csv_name,
+                               file_stem=f"{stem}_{method}")
 
         if out_cfg.get("save_classification_map", True):
-            self._save_class_map(class_map, class_info, file_out_dir / "class_map.png")
+            self._save_class_map(
+                class_map, class_info,
+                file_out_dir / f"class_map_{method}.png"
+            )
 
         # ---- 6. Add to report ----
         elapsed_sec = time.time() - t_file
