@@ -22,7 +22,8 @@ cache/
 roi_spectrum.csv
 *.log
 
-# Large local acquisitions (existing tracked examples are unaffected)
+# Large local acquisitions
+data/
 *.ceres
 
 # Machine-specific assistant settings may contain credentials
