@@ -184,6 +184,78 @@ def apply_calibration(df: pd.DataFrame, a, b) -> pd.DataFrame:
     return out
 
 
+def calibration_diagnostics(
+    raw_stats: pd.DataFrame,
+    calibrated_stats: pd.DataFrame,
+    a,
+    b,
+    wavelengths=None,
+) -> pd.DataFrame:
+    """Build a per-band audit table for an ROI calibration.
+
+    Flags are deliberately conservative: invalid/non-positive coefficients,
+    robust gain outliers, or an ROI mean reflectance outside the broad
+    physically plausible range -0.05..1.20.  The function diagnoses but never
+    edits coefficients or spectra.
+    """
+    coeff_a = np.asarray(a, dtype=np.float64)
+    coeff_b = np.asarray(b, dtype=np.float64)
+    bands = len(raw_stats)
+    if len(calibrated_stats) != bands or coeff_a.shape != (bands,) or coeff_b.shape != (bands,):
+        raise ValueError("Raw, calibrated, and coefficient band counts must match")
+
+    raw_mean = raw_stats["mean"].to_numpy(dtype=float)
+    calibrated_mean = calibrated_stats["mean"].to_numpy(dtype=float)
+    finite = (
+        np.isfinite(coeff_a)
+        & np.isfinite(coeff_b)
+        & np.isfinite(raw_mean)
+        & np.isfinite(calibrated_mean)
+    )
+    nonpositive = finite & (coeff_a <= 0)
+    reflectance_range = finite & (
+        (calibrated_mean < -0.05) | (calibrated_mean > 1.20)
+    )
+
+    gain_outlier = np.zeros(bands, dtype=bool)
+    positive = finite & (coeff_a > 0)
+    if int(positive.sum()) >= 7:
+        log_gain = np.log10(coeff_a[positive])
+        center = float(np.median(log_gain))
+        mad = float(np.median(np.abs(log_gain - center)))
+        if mad > 1e-12:
+            robust_z = np.abs(0.67448975 * (log_gain - center) / mad)
+            gain_outlier[np.flatnonzero(positive)] = robust_z > 6.0
+
+    flags = []
+    for index in range(bands):
+        current = []
+        if not finite[index]:
+            current.append("invalid coefficient/value")
+        if nonpositive[index]:
+            current.append("non-positive gain")
+        if gain_outlier[index]:
+            current.append("gain outlier")
+        if reflectance_range[index]:
+            current.append("ROI reflectance outside -0.05..1.20")
+        flags.append("; ".join(current))
+
+    frame = pd.DataFrame(
+        {
+            "band_index": np.arange(bands),
+            "raw_mean": raw_mean,
+            "calibrated_mean": calibrated_mean,
+            "calibration_a": coeff_a,
+            "calibration_b": coeff_b,
+            "suspect": (~finite) | nonpositive | gain_outlier | reflectance_range,
+            "diagnostic": flags,
+        }
+    )
+    if wavelengths is not None and len(wavelengths) == bands:
+        frame.insert(1, "wavelength_nm", np.asarray(wavelengths, dtype=float))
+    return frame
+
+
 def save_roi_csv(
     data: np.ndarray,
     wavelengths,

@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
+from plotly.subplots import make_subplots
 import streamlit as st
 from streamlit_image_coordinates import streamlit_image_coordinates
 
@@ -36,6 +37,7 @@ from src.path_picker import (
     choose_file as _choose_file,
     native_dialogs_available as _native_dialogs_available,
 )
+from src.report_options import REPORT_PRESETS
 
 # ============================================================
 # Page config
@@ -671,6 +673,107 @@ with st.sidebar:
 
     st.markdown("---")
 
+    # ── Selectable report builder ────────────────────────────
+    st.markdown("### 📋 결과 리포트")
+    _REPORT_PRESET_LABELS = {
+        "quick_qc": "⚡ 빠른 필드 QC (추천)",
+        "research_standard": "🔬 연구용 표준 리포트",
+        "custom": "🛠️ 사용자 지정",
+    }
+    report_preset = st.selectbox(
+        "리포트 구성",
+        list(_REPORT_PRESET_LABELS),
+        format_func=lambda key: _REPORT_PRESET_LABELS[key],
+        key="report_preset",
+        help="계산하고 HTML/PNG로 남길 결과 항목을 선택합니다.",
+    )
+    _report_defaults = REPORT_PRESETS[report_preset]
+    report_sections = dict(_report_defaults["sections"])
+    report_statistics = list(_report_defaults["spectra_statistics"])
+    report_indices = list(_report_defaults["indices"])
+    save_selected_images = bool(_report_defaults["save_selected_images"])
+    save_daily_summary = bool(_report_defaults["daily_summary"])
+    save_html_report = True
+    save_spectra_csv = True
+
+    with st.expander(
+        "리포트 항목 확인·선택",
+        expanded=report_preset == "custom",
+    ):
+        if report_preset != "custom":
+            _enabled_sections = [
+                key for key, enabled in report_sections.items() if enabled
+            ]
+            st.caption(
+                "포함 항목: " + ", ".join(_enabled_sections)
+                + "\n\n스펙트럼 통계: " + ", ".join(report_statistics)
+                + " · 식생지수: " + (", ".join(report_indices) or "없음")
+            )
+        else:
+            _section_labels = {
+                "rgb": "RGB 이미지",
+                "false_color": "CIR 위색도",
+                "spectral_indices": "선택 식생지수 이미지·요약",
+                "class_map": "클러스터 맵",
+                "cluster_overlay": "RGB+클러스터 오버레이",
+                "per_class_images": "클러스터별 분리 이미지",
+                "class_summary": "클러스터별 픽셀 통계",
+                "spectral_plot": "클러스터별 스펙트럼",
+                "quality_metrics": "클러스터 품질·분리도",
+                "vegetation_quality": "식생 분리도 평가",
+                "calibration_qc": "보정파일·유효밴드 QC",
+            }
+            _sc1, _sc2 = st.columns(2)
+            for _section_index, (_section_key, _section_label) in enumerate(
+                _section_labels.items()
+            ):
+                _target_column = _sc1 if _section_index % 2 == 0 else _sc2
+                with _target_column:
+                    report_sections[_section_key] = st.checkbox(
+                        _section_label,
+                        value=bool(report_sections.get(_section_key)),
+                        key=f"report_section_{_section_key}",
+                    )
+
+            report_statistics = st.multiselect(
+                "스펙트럼 통계",
+                ["mean", "median", "std", "iqr"],
+                default=report_statistics,
+                key="report_statistics",
+                help="std는 평균±표준편차, iqr은 25–75% 범위입니다.",
+            ) or ["mean"]
+            report_indices = st.multiselect(
+                "식생지수",
+                ["NDVI", "GNDVI", "NDRE", "PRI"],
+                default=report_indices,
+                key="report_indices",
+                help="보정 반사율과 필요한 파장 밴드가 있을 때만 계산합니다.",
+            )
+            save_html_report = st.checkbox(
+                "인터랙티브 HTML 리포트 저장", value=True, key="report_save_html"
+            )
+            save_spectra_csv = st.checkbox(
+                "스펙트럼 CSV 저장", value=True, key="report_save_csv"
+            )
+            save_selected_images = st.checkbox(
+                "선택한 이미지들을 PNG로 별도 저장",
+                value=True,
+                key="report_save_images",
+            )
+            save_daily_summary = st.checkbox(
+                "배치 처리 시 하루 전체 요약 HTML·CSV 저장",
+                value=True,
+                key="report_daily_summary",
+            )
+
+        if report_indices:
+            st.info(
+                "NDVI/GNDVI/NDRE/PRI는 보정 반사율에서만 계산합니다. "
+                "보정이 없거나 필요한 파장이 없으면 리포트에 계산 불가 이유를 기록합니다."
+            )
+
+    st.markdown("---")
+
     # ── Output / misc ────────────────────────────────────────
     st.markdown("### 📁 출력")
     _of1, _of2 = st.columns([4, 1])
@@ -897,14 +1000,20 @@ with tab_run:
             },
             "output": {
                 "dir":                     output_dir,
-                "save_classification_map": True,
-                "save_spectra_csv":        True,
-                "save_report":             True,
+                "save_classification_map": bool(report_sections.get("class_map")),
+                "save_spectra_csv":        save_spectra_csv,
+                "save_report":             save_html_report,
                 "per_file_report":         run_mode == "📦 전체 배치 처리",
             },
             "report": {
                 "title":            "Hyperspectral Field Crop Analysis",
-                "spectra_show_std": True,
+                "preset":           report_preset,
+                "sections":         report_sections,
+                "spectra_statistics": report_statistics,
+                "indices":          report_indices,
+                "save_selected_images": save_selected_images,
+                "daily_summary":    save_daily_summary,
+                "spectra_show_std": "std" in report_statistics,
                 "lang":             "ko",
             },
         }
@@ -976,9 +1085,9 @@ with tab_run:
 
             out_p = Path(output_dir)
 
-            # Find all report_*.html files (root + per-file subdirectories)
+            # Find per-file and daily HTML reports (root + subdirectories).
             reports = sorted(
-                out_p.rglob("report*.html"),
+                out_p.rglob("*report*.html"),
                 key=lambda p: p.stat().st_mtime,
                 reverse=True,
             )
@@ -1173,6 +1282,7 @@ with tab_roi:
                 st.session_state["roi2_cal_error"] = ""
                 st.session_state["roi2_cal_search"] = {}
                 st.session_state["roi2_show_reflectance_rgb"] = False
+                st.session_state["roi2_spectrum_view"] = "원본 DN"
                 st.session_state["roi2_zoom_region"] = None
                 st.session_state["roi2_zoom_revision"] = (
                     int(st.session_state.get("roi2_zoom_revision", 0)) + 1
@@ -1238,6 +1348,7 @@ with tab_roi:
                         }
                         st.session_state["roi2_units"] = "reflectance"
                         st.session_state["roi2_show_reflectance_rgb"] = True
+                        st.session_state["roi2_spectrum_view"] = "보정 반사율"
                         st.session_state["roi2_cal_file"] = _candidate_path
                         _selected_calibration = {
                             "path": _candidate_path,
@@ -2024,28 +2135,56 @@ with tab_roi:
                                 )
                                 st.rerun()
 
-                    _stats, _npix, _bounds, _rtype = roi_utils.roi_stats(_rdata, _region)
+                    _raw_stats, _npix, _bounds, _rtype = roi_utils.roi_stats(
+                        _rdata, _region
+                    )
 
-                    # Empirical line is affine per band, so the statistics can
-                    # be converted directly — no need to touch the whole cube.
+                    # Empirical-line calibration is affine per band, so both
+                    # views can be prepared from one ROI statistics pass.
                     _calib = st.session_state.get("roi2_cal")
+                    _calibrated_stats = None
                     if _calib is not None:
-                        _stats = roi_utils.apply_calibration(
-                            _stats, _calib["a"], _calib["b"]
+                        _calibrated_stats = roi_utils.apply_calibration(
+                            _raw_stats, _calib["a"], _calib["b"]
                         )
+
+                    _view_options = (
+                        ["보정 반사율", "원본 DN", "원본·보정 비교"]
+                        if _calibrated_stats is not None
+                        else ["원본 DN"]
+                    )
+                    if st.session_state.get("roi2_spectrum_view") not in _view_options:
+                        st.session_state["roi2_spectrum_view"] = _view_options[0]
+                    _spectrum_view = st.radio(
+                        "스펙트럼 데이터 선택",
+                        _view_options,
+                        horizontal=True,
+                        key="roi2_spectrum_view",
+                        help=(
+                            "같은 ROI의 원본 DN과 보정 반사율을 즉시 전환합니다. "
+                            "비교 모드는 반사율(왼쪽)과 DN(오른쪽)을 서로 다른 Y축에 표시합니다."
+                        ),
+                    )
+                    _stats = (
+                        _raw_stats
+                        if _spectrum_view == "원본 DN"
+                        else _calibrated_stats
+                    )
+                    if _stats is None:
+                        _stats = _raw_stats
 
                     st.caption(
                         f"사용된 픽셀 수: {_npix:,}"
-                        + (f"  ·  반사율 변환 적용 ({_calib['method']})"
+                        + (f"  ·  연결된 보정: {_calib['method']}"
                            if _calib is not None else "")
                     )
 
-                    _has_wl = _rwl is not None and len(_rwl) == len(_stats)
-                    _xax   = _rwl if _has_wl else list(range(len(_stats)))
+                    _has_wl = _rwl is not None and len(_rwl) == len(_raw_stats)
+                    _xax   = _rwl if _has_wl else list(range(len(_raw_stats)))
                     _xttl  = "Wavelength (nm)" if _has_wl else "Band index"
 
                     st.markdown("##### 그래프 표시 범위")
-                    _plot_mask = np.ones(len(_stats), dtype=bool)
+                    _plot_mask = np.ones(len(_raw_stats), dtype=bool)
                     if _has_wl:
                         _wl_array = np.asarray(_rwl, dtype=float)
                         _finite_wl = _wl_array[np.isfinite(_wl_array)]
@@ -2058,7 +2197,7 @@ with tab_roi:
                             _finite_wl[np.argmin(np.abs(_finite_wl - 900.0))]
                         )
                         _wave_key = (
-                            f"roi2_wave_range_{len(_stats)}_"
+                            f"roi2_wave_range_{len(_raw_stats)}_"
                             f"{_wl_min:.2f}_{_wl_max:.2f}"
                         )
                         if _wave_key not in st.session_state:
@@ -2126,53 +2265,190 @@ with tab_roi:
                             st.warning("Y축 최대값은 최소값보다 커야 합니다. 현재는 자동 범위를 사용합니다.")
 
                     _plot_x = np.asarray(_xax)[_plot_mask]
-                    _plot_mean = _stats["mean"].to_numpy()[_plot_mask]
-                    _plot_median = _stats["median"].to_numpy()[_plot_mask]
-                    _plot_std = _stats["std"].to_numpy()[_plot_mask]
 
-                    _sfig = go.Figure()
-                    if _show_band:
-                        _upper = _plot_mean + _plot_std
-                        _lower = _plot_mean - _plot_std
-                        _sfig.add_trace(go.Scatter(
-                            x=list(_plot_x) + list(_plot_x)[::-1],
-                            y=list(_upper) + list(_lower)[::-1],
-                            fill="toself",
-                            fillcolor="rgba(31,119,180,0.15)",
-                            line=dict(color="rgba(0,0,0,0)"),
-                            hoverinfo="skip",
-                            name="±1 std",
-                        ))
-                    _sfig.add_trace(go.Scatter(
-                        x=_plot_x, y=_plot_mean, mode="lines",
-                        name="Mean", line=dict(color="#1f77b4", width=2.5),
-                    ))
-                    _sfig.add_trace(go.Scatter(
-                        x=_plot_x, y=_plot_median, mode="lines",
-                        name="Median", line=dict(color="#d62728", width=1.6, dash="dash"),
-                    ))
-                    _spectrum_title = (
-                        "ROI 반사율 스펙트럼 — 보정 적용됨"
-                        if _calib is not None
-                        else "ROI Raw DN 스펙트럼 — 보정 미적용"
-                    )
-                    _spectrum_y_title = (
-                        "Reflectance (unitless)"
-                        if _calib is not None else "Raw DN"
-                    )
+                    def _add_roi_stat_traces(
+                        figure,
+                        frame,
+                        *,
+                        prefix,
+                        mean_color,
+                        median_color,
+                        fill_color,
+                        secondary_y=False,
+                    ):
+                        _mean = frame["mean"].to_numpy()[_plot_mask]
+                        _median = frame["median"].to_numpy()[_plot_mask]
+                        _std = frame["std"].to_numpy()[_plot_mask]
+                        if _show_band:
+                            figure.add_trace(
+                                go.Scatter(
+                                    x=list(_plot_x) + list(_plot_x)[::-1],
+                                    y=list(_mean + _std) + list(_mean - _std)[::-1],
+                                    fill="toself",
+                                    fillcolor=fill_color,
+                                    line=dict(color="rgba(0,0,0,0)"),
+                                    hoverinfo="skip",
+                                    name=f"{prefix} ±1 std",
+                                    showlegend=False,
+                                ),
+                                secondary_y=secondary_y,
+                            ) if getattr(figure, "_grid_ref", None) is not None else figure.add_trace(
+                                go.Scatter(
+                                    x=list(_plot_x) + list(_plot_x)[::-1],
+                                    y=list(_mean + _std) + list(_mean - _std)[::-1],
+                                    fill="toself", fillcolor=fill_color,
+                                    line=dict(color="rgba(0,0,0,0)"),
+                                    hoverinfo="skip", name=f"{prefix} ±1 std",
+                                    showlegend=False,
+                                )
+                            )
+                        _mean_trace = go.Scatter(
+                            x=_plot_x, y=_mean, mode="lines",
+                            name=f"{prefix} Mean",
+                            line=dict(color=mean_color, width=2.5),
+                        )
+                        _median_trace = go.Scatter(
+                            x=_plot_x, y=_median, mode="lines",
+                            name=f"{prefix} Median",
+                            line=dict(color=median_color, width=1.6, dash="dash"),
+                        )
+                        if getattr(figure, "_grid_ref", None) is not None:
+                            figure.add_trace(_mean_trace, secondary_y=secondary_y)
+                            figure.add_trace(_median_trace, secondary_y=secondary_y)
+                        else:
+                            figure.add_trace(_mean_trace)
+                            figure.add_trace(_median_trace)
+
+                    if _spectrum_view == "원본·보정 비교":
+                        _sfig = make_subplots(specs=[[{"secondary_y": True}]])
+                        _add_roi_stat_traces(
+                            _sfig, _calibrated_stats,
+                            prefix="Reflectance", mean_color="#1f77b4",
+                            median_color="#17becf", fill_color="rgba(31,119,180,0.13)",
+                            secondary_y=False,
+                        )
+                        _add_roi_stat_traces(
+                            _sfig, _raw_stats,
+                            prefix="Raw DN", mean_color="#ff7f0e",
+                            median_color="#d62728", fill_color="rgba(255,127,14,0.10)",
+                            secondary_y=True,
+                        )
+                        _sfig.update_yaxes(
+                            title_text="Reflectance (unitless)",
+                            range=_y_range,
+                            secondary_y=False,
+                        )
+                        _sfig.update_yaxes(title_text="Raw DN", secondary_y=True)
+                        _spectrum_title = "같은 ROI의 원본 DN ↔ 보정 반사율 비교"
+                    else:
+                        _sfig = go.Figure()
+                        _is_reflectance_view = _spectrum_view == "보정 반사율"
+                        _add_roi_stat_traces(
+                            _sfig, _stats,
+                            prefix="Reflectance" if _is_reflectance_view else "Raw DN",
+                            mean_color="#1f77b4" if _is_reflectance_view else "#ff7f0e",
+                            median_color="#d62728",
+                            fill_color=(
+                                "rgba(31,119,180,0.15)" if _is_reflectance_view
+                                else "rgba(255,127,14,0.12)"
+                            ),
+                        )
+                        _spectrum_title = (
+                            "ROI 반사율 스펙트럼 — 보정 적용됨"
+                            if _is_reflectance_view
+                            else "ROI Raw DN 스펙트럼"
+                        )
+                        _sfig.update_yaxes(
+                            title_text=(
+                                "Reflectance (unitless)" if _is_reflectance_view else "Raw DN"
+                            ),
+                            range=(
+                                _y_range
+                                if _is_reflectance_view or _y_mode != "반사율 0–1"
+                                else None
+                            ),
+                        )
+                        if not _is_reflectance_view and _y_mode == "반사율 0–1":
+                            st.warning("원본 DN 보기에서는 ‘반사율 0–1’ Y축 설정을 적용하지 않았습니다.")
+
                     _sfig.update_layout(
                         title=_spectrum_title,
-                        height=380,
+                        height=420,
                         xaxis_title=_xttl,
-                        yaxis=dict(
-                            title=_spectrum_y_title,
-                            range=_y_range,
-                        ),
-                        margin=dict(l=50, r=10, t=30, b=45),
-                        legend=dict(orientation="h", y=1.1),
+                        margin=dict(l=50, r=55, t=45, b=45),
+                        legend=dict(orientation="h", y=1.14),
                         hovermode="x unified",
                     )
                     st.plotly_chart(_sfig, use_container_width=True, key="roi2_spec_chart")
+
+                    if _calib is not None and _calibrated_stats is not None:
+                        with st.expander("🩺 보정 이상 밴드·계수 진단", expanded=False):
+                            _diag = roi_utils.calibration_diagnostics(
+                                _raw_stats,
+                                _calibrated_stats,
+                                _calib["a"],
+                                _calib["b"],
+                                _rwl if _has_wl else None,
+                            )
+                            _suspect = _diag[_diag["suspect"]]
+                            _dc1, _dc2, _dc3 = st.columns(3)
+                            _dc1.metric("전체 밴드", f"{len(_diag):,}")
+                            _dc2.metric("진단 경고 밴드", f"{len(_suspect):,}")
+                            _dc3.metric(
+                                "경고 비율",
+                                f"{100.0 * len(_suspect) / max(len(_diag), 1):.1f}%",
+                            )
+                            if len(_suspect):
+                                st.warning(
+                                    "자동 진단은 보정값을 수정하지 않습니다. 아래 밴드의 패널 포화, "
+                                    "White/Dark 선택, 보정계수 a·b를 우선 확인하세요."
+                                )
+                                st.dataframe(
+                                    _suspect,
+                                    use_container_width=True,
+                                    hide_index=True,
+                                    height=min(340, 70 + 35 * len(_suspect)),
+                                )
+                            else:
+                                st.success(
+                                    "현재 ROI에서는 무효/음수 gain, 극단적 gain, "
+                                    "-0.05–1.20 밖의 평균 반사율이 감지되지 않았습니다."
+                                )
+
+                            _diag_x = (
+                                _diag["wavelength_nm"]
+                                if "wavelength_nm" in _diag else _diag["band_index"]
+                            )
+                            _coef_fig = make_subplots(specs=[[{"secondary_y": True}]])
+                            _coef_fig.add_trace(
+                                go.Scatter(
+                                    x=_diag_x, y=_diag["calibration_a"],
+                                    name="a (gain)", line=dict(color="#9467bd"),
+                                ),
+                                secondary_y=False,
+                            )
+                            _coef_fig.add_trace(
+                                go.Scatter(
+                                    x=_diag_x, y=_diag["calibration_b"],
+                                    name="b (offset)", line=dict(color="#8c564b"),
+                                ),
+                                secondary_y=True,
+                            )
+                            _coef_fig.update_yaxes(title_text="a", secondary_y=False)
+                            _coef_fig.update_yaxes(title_text="b", secondary_y=True)
+                            _coef_fig.update_layout(
+                                title="적용된 보정계수 · R = a × DN + b",
+                                height=330,
+                                xaxis_title=_xttl,
+                                legend=dict(orientation="h", y=1.12),
+                                margin=dict(l=50, r=55, t=45, b=40),
+                                hovermode="x unified",
+                            )
+                            st.plotly_chart(
+                                _coef_fig,
+                                use_container_width=True,
+                                key="roi2_calibration_coefficients",
+                            )
 
                     # Vegetation index readout — meaningful because values are raw
                     if _has_wl:
@@ -2180,13 +2456,24 @@ with tab_roi:
                         _ri  = int(np.argmin(np.abs(_wla - 670)))
                         _ni  = int(np.argmin(np.abs(_wla - 800)))
                         if abs(_wla[_ri] - 670) < 25 and abs(_wla[_ni] - 800) < 25:
-                            _red = float(_stats["mean"].iloc[_ri])
-                            _nir = float(_stats["mean"].iloc[_ni])
+                            _index_stats = (
+                                _raw_stats
+                                if _spectrum_view == "원본 DN"
+                                else (
+                                    _calibrated_stats
+                                    if _calibrated_stats is not None
+                                    else _raw_stats
+                                )
+                            )
+                            _red = float(_index_stats["mean"].iloc[_ri])
+                            _nir = float(_index_stats["mean"].iloc[_ni])
                             _den = _nir + _red
                             if _den > 1e-9:
                                 m1, m2 = st.columns(2)
                                 _index_suffix = (
-                                    " (반사율)" if _calib is not None else " (Raw DN 참고용)"
+                                    " (Raw DN 참고용)"
+                                    if _spectrum_view == "원본 DN"
+                                    else " (반사율)"
                                 )
                                 m1.metric(
                                     "NDVI" + _index_suffix,
@@ -2194,13 +2481,21 @@ with tab_roi:
                                 )
                                 m2.metric("NIR/Red" + _index_suffix, f"{_nir / _red:.3f}"
                                           if _red > 1e-9 else "—")
-                                if _calib is None:
+                                if _spectrum_view == "원본 DN":
                                     st.caption(
                                         "⚠️ Raw DN 기반 식생지수는 센서의 밴드별 감도와 Dark 영향을 "
                                         "포함하므로 논문용 지수로 사용하지 마세요."
                                     )
 
-                    _prev = _stats[["mean", "median", "std"]].copy()
+                    if _spectrum_view == "원본·보정 비교":
+                        _prev = pd.DataFrame({
+                            "raw_mean": _raw_stats["mean"],
+                            "raw_median": _raw_stats["median"],
+                            "reflectance_mean": _calibrated_stats["mean"],
+                            "reflectance_median": _calibrated_stats["median"],
+                        })
+                    else:
+                        _prev = _stats[["mean", "median", "std"]].copy()
                     if _has_wl:
                         _prev.insert(0, "wavelength_nm", _rwl)
                     else:

@@ -161,6 +161,26 @@ report:
   title: "Hyperspectral Field Crop Analysis"
   author: ""
 
+  # quick_qc | research_standard | custom
+  # UI selections are written into processing_manifest.json for reproducibility.
+  preset: "research_standard"
+  sections:
+    rgb: true
+    false_color: true
+    spectral_indices: true
+    class_map: true
+    cluster_overlay: true
+    per_class_images: true
+    class_summary: true
+    spectral_plot: true
+    quality_metrics: true
+    vegetation_quality: true
+    calibration_qc: true
+  spectra_statistics: ["mean", "median", "std", "iqr"]
+  indices: ["NDVI", "GNDVI", "NDRE", "PRI"]
+  save_selected_images: true
+  daily_summary: true
+
   # RGB composite for visual reference
   show_rgb_composite: true
   rgb_red_nm: 660             # Wavelength (nm) mapped to red channel

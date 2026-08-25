@@ -16,6 +16,7 @@ import base64
 import io
 import logging
 import datetime
+import html
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
@@ -23,6 +24,8 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+
+from .report_options import resolve_report_options
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +94,15 @@ _T_KO: Dict[str, str] = {
     "band_index":         "밴드 인덱스",
     "reflectance":        "반사율",
     "processing_time":    "처리 시간",
+    "cluster_overlay":    "RGB + 클러스터 오버레이",
+    "indices_title":      "🌱 선택 식생지수",
+    "index_unavailable":  "계산하지 않음: {reason}",
+    "calibration_qc":     "🎯 반사율 보정 이력 및 품질관리",
+    "calibration_none":   "반사율 보정이 적용되지 않았습니다. 식생지수는 리포트에서 계산하지 않습니다.",
+    "calibration_profile": "보정 프로파일",
+    "calibration_method": "보정 방법",
+    "calibration_valid":  "유효 보정 밴드",
+    "daily_summary_title": "하루 전체 분석 요약",
     # ── 품질 해석 문구 ──
     "interp_title":         "📋 결과 해석",
     "quality_what":         "이 점수는 클래스들이 스펙트럼 공간에서 얼마나 잘 분리됐는지를 나타냅니다. 높을수록 각 클래스의 픽셀들이 서로 비슷하고 다른 클래스와는 확실히 다르다는 의미입니다.",
@@ -174,6 +186,15 @@ _T_EN: Dict[str, str] = {
     "band_index":         "Band Index",
     "reflectance":        "Reflectance",
     "processing_time":    "Processing Time",
+    "cluster_overlay":    "RGB + Cluster Overlay",
+    "indices_title":      "🌱 Selected Vegetation Indices",
+    "index_unavailable":  "Not calculated: {reason}",
+    "calibration_qc":     "🎯 Reflectance Calibration Provenance and QC",
+    "calibration_none":   "Reflectance calibration was not applied. Vegetation indices are not calculated for this report.",
+    "calibration_profile": "Calibration Profile",
+    "calibration_method": "Calibration Method",
+    "calibration_valid":  "Valid Calibration Bands",
+    "daily_summary_title": "Daily Analysis Summary",
     # ── Quality interpretation strings ──
     "interp_title":         "📋 Interpretation",
     "quality_what":         "This score reflects how well the classes are separated in spectral space. Higher values mean pixels within each class are spectrally similar to each other and distinct from other classes.",
@@ -291,6 +312,7 @@ class Reporter:
     def __init__(self, config: dict, lang: str = "ko"):
         self.cfg    = config
         self.rcfg   = config.get("report", {})
+        self.options = resolve_report_options(config)
         self.lang   = lang
         self._labels: Dict[str, str] = _T_EN if lang == "en" else _T_KO
         self.results: List[Dict[str, Any]] = []
@@ -317,6 +339,7 @@ class Reporter:
         separability: Optional[Dict[str, Any]] = None,
         veg_sep: Optional[Dict[str, Any]] = None,
         elapsed_sec: Optional[float] = None,
+        index_results: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> None:
         self.results.append(dict(
             filename=filename, data=data, class_map=class_map,
@@ -324,6 +347,7 @@ class Reporter:
             wavelengths=wavelengths, metadata=metadata,
             metrics=metrics, separability=separability,
             veg_sep=veg_sep, elapsed_sec=elapsed_sec,
+            index_results=index_results or {},
         ))
 
     def render(self, output_path: str | Path) -> None:
@@ -359,6 +383,56 @@ class Reporter:
             f.write("\n".join(html_parts))
         logger.info(f"Report saved: {output_path}")
 
+    def render_daily_summary(
+        self,
+        summaries: List[Dict[str, Any]],
+        output_path: str | Path,
+    ) -> None:
+        """Write a lightweight batch-level HTML table with detail links."""
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        columns = [
+            ("filename", "File" if self.lang == "en" else "파일"),
+            ("value_units", "Units" if self.lang == "en" else "단위"),
+            ("calibration_profile", "Calibration" if self.lang == "en" else "보정파일"),
+            ("n_classes", "Classes" if self.lang == "en" else "클래스"),
+            ("ndvi_mean", "NDVI mean" if self.lang == "en" else "NDVI 평균"),
+            ("ndvi_median", "NDVI median" if self.lang == "en" else "NDVI 중앙값"),
+            ("vegetation_fraction", "Vegetation fraction" if self.lang == "en" else "식생 비율"),
+            ("silhouette", "Silhouette"),
+            ("elapsed_seconds", "Time (s)" if self.lang == "en" else "시간(초)"),
+            ("detail_report", "Detail" if self.lang == "en" else "상세"),
+        ]
+        header = "".join(f"<th>{html.escape(label)}</th>" for _, label in columns)
+        rows = []
+        for summary in summaries:
+            cells = []
+            for key, _ in columns:
+                value = summary.get(key, "")
+                if isinstance(value, float):
+                    value = f"{value:.4f}"
+                if key == "detail_report" and value:
+                    try:
+                        href = Path(str(value)).resolve().relative_to(output_path.parent.resolve())
+                        cell = f'<a href="{html.escape(href.as_posix())}">open</a>'
+                    except Exception:
+                        cell = html.escape(str(value))
+                else:
+                    cell = html.escape(str(value if value is not None else ""))
+                cells.append(f"<td>{cell}</td>")
+            rows.append(f"<tr>{''.join(cells)}</tr>")
+
+        title = self._t("daily_summary_title")
+        html_text = "\n".join([
+            _HTML_HEAD.format(title=title, html_lang=self._t("html_lang")),
+            f'<div class="header"><h1>{title}</h1><p>{self._t("generated_at")}: {timestamp} &nbsp;|&nbsp; {self._t("files_processed")}: {len(summaries)}</p></div>',
+            f'<div class="card"><table><thead><tr>{header}</tr></thead><tbody>{"".join(rows)}</tbody></table></div>',
+            _HTML_FOOT.format(timestamp=timestamp),
+        ])
+        output_path.write_text(html_text, encoding="utf-8")
+        logger.info(f"Daily report saved: {output_path}")
+
     # ---------------------------------------------------------- #
     # Per-file block
     # ---------------------------------------------------------- #
@@ -374,6 +448,7 @@ class Reporter:
 
         H, W, B = data.shape
         n_px    = H * W
+        sections = self.options["sections"]
 
         # Elapsed time formatting
         elapsed_sec = result.get("elapsed_sec")
@@ -383,14 +458,15 @@ class Reporter:
         else:
             elapsed_str = "—"
 
-        # Pre-compute RGB array once (reused for per-class overlays)
-        rgb_arr = self._get_rgb_array(data, wl, mode="rgb")
+        needs_rgb = any(
+            sections.get(key, False)
+            for key in ("rgb", "cluster_overlay", "per_class_images")
+        )
+        rgb_arr = self._get_rgb_array(data, wl, mode="rgb") if needs_rgb else None
 
         parts = [
             f'<div class="file-block" id="file-{idx}">',
             f'<h2>📁 {fname}</h2>',
-
-            # ── Summary stats ─────────────────────────────────────
             '<div class="stat-row">',
             self._stat_box(self._t("resolution"),      f"{W} × {H}"),
             self._stat_box(self._t("bands"),            str(B)),
@@ -399,53 +475,102 @@ class Reporter:
             self._stat_box(self._t("format"),           meta.get("format", "—")),
             self._stat_box(self._t("processing_time"),  elapsed_str),
             '</div>',
-
-            # ── Overview images (RGB / CIR / Classification map) ──
-            '<div class="card">',
-            f'<h2>{self._t("image_overview")}</h2>',
-            '<div class="img-grid">',
-            self._img_card(self._t("rgb_composite"),
-                           self._array_to_b64(rgb_arr)),
-            self._img_card(self._t("cir_falsecolor"),
-                           self._array_to_b64(self._get_rgb_array(data, wl, "cir"))),
-            self._img_card(self._t("class_map"),
-                           self._make_class_map_img(class_map, class_info)),
-            '</div></div>',
-
-            # ── Per-class images ───────────────────────────────────
-            '<div class="card">',
-            f'<h2>{self._t("per_class_images")}</h2>',
-            f'<p style="font-size:12px;color:#888;margin-bottom:14px;">'
-            f'{self._t("per_class_caption")}</p>',
-            self._render_per_class_images(data, class_map, class_info, rgb_arr, n_px),
-            '</div>',
-
-            # ── Classification summary table ───────────────────────
-            '<div class="card">',
-            f'<h2>{self._t("class_summary")}</h2>',
-            self._class_table(class_info, n_px),
-            '</div>',
-
-            # ── Spectral chart ─────────────────────────────────────
-            '<div class="card">',
-            f'<h2>{self._t("spectra_chart")}</h2>',
-            self._spectra_plot_html(spectra, wl),
-            '</div>',
-
-            # ── Quality assessment ─────────────────────────────────
-            '<div class="card">',
-            f'<h2>{self._t("quality_title")}</h2>',
-            self._render_quality_section(result.get("metrics"), result.get("separability")),
-            '</div>',
-
-            # ── Vegetation separation ──────────────────────────────
-            '<div class="card">',
-            f'<h2>{self._t("veg_sep_title")}</h2>',
-            self._render_veg_separation_card(result.get("veg_sep")),
-            '</div>',
-
-            '</div>',  # file-block
         ]
+
+        overview_cards = []
+        if sections.get("rgb") and rgb_arr is not None:
+            overview_cards.append(
+                self._img_card(self._t("rgb_composite"), self._array_to_b64(rgb_arr))
+            )
+        if sections.get("false_color"):
+            overview_cards.append(
+                self._img_card(
+                    self._t("cir_falsecolor"),
+                    self._array_to_b64(self._get_rgb_array(data, wl, "cir")),
+                )
+            )
+        if sections.get("class_map"):
+            overview_cards.append(
+                self._img_card(
+                    self._t("class_map"),
+                    self._array_to_b64(self._make_class_map_array(class_map, class_info)),
+                )
+            )
+        if sections.get("cluster_overlay") and rgb_arr is not None:
+            overview_cards.append(
+                self._img_card(
+                    self._t("cluster_overlay"),
+                    self._array_to_b64(
+                        self._make_cluster_overlay_array(rgb_arr, class_map, class_info)
+                    ),
+                )
+            )
+        if overview_cards:
+            parts.extend([
+                '<div class="card">',
+                f'<h2>{self._t("image_overview")}</h2>',
+                f'<div class="img-grid">{"".join(overview_cards)}</div>',
+                '</div>',
+            ])
+
+        if sections.get("spectral_indices"):
+            parts.extend([
+                '<div class="card">',
+                f'<h2>{self._t("indices_title")}</h2>',
+                self._render_indices_section(result.get("index_results") or {}),
+                '</div>',
+            ])
+
+        if sections.get("per_class_images") and rgb_arr is not None:
+            parts.extend([
+                '<div class="card">',
+                f'<h2>{self._t("per_class_images")}</h2>',
+                f'<p style="font-size:12px;color:#888;margin-bottom:14px;">{self._t("per_class_caption")}</p>',
+                self._render_per_class_images(data, class_map, class_info, rgb_arr, n_px),
+                '</div>',
+            ])
+
+        if sections.get("class_summary"):
+            parts.extend([
+                '<div class="card">',
+                f'<h2>{self._t("class_summary")}</h2>',
+                self._class_table(class_info, n_px),
+                '</div>',
+            ])
+
+        if sections.get("spectral_plot"):
+            parts.extend([
+                '<div class="card">',
+                f'<h2>{self._t("spectra_chart")}</h2>',
+                self._spectra_plot_html(spectra, wl),
+                '</div>',
+            ])
+
+        if sections.get("quality_metrics"):
+            parts.extend([
+                '<div class="card">',
+                f'<h2>{self._t("quality_title")}</h2>',
+                self._render_quality_section(result.get("metrics"), result.get("separability")),
+                '</div>',
+            ])
+
+        if sections.get("vegetation_quality"):
+            parts.extend([
+                '<div class="card">',
+                f'<h2>{self._t("veg_sep_title")}</h2>',
+                self._render_veg_separation_card(result.get("veg_sep")),
+                '</div>',
+            ])
+
+        if sections.get("calibration_qc"):
+            parts.extend([
+                '<div class="card">',
+                f'<h2>{self._t("calibration_qc")}</h2>',
+                self._render_calibration_qc(meta.get("calibration")),
+                '</div>',
+            ])
+
+        parts.append('</div>')
         return "\n".join(parts)
 
     # ---------------------------------------------------------- #
@@ -550,11 +675,153 @@ class Reporter:
         class_info: List[Dict[str, Any]],
     ) -> str:
         """Full classification map with all classes coloured."""
+        return self._array_to_b64(self._make_class_map_array(class_map, class_info))
+
+    @staticmethod
+    def _make_class_map_array(
+        class_map: np.ndarray,
+        class_info: List[Dict[str, Any]],
+    ) -> np.ndarray:
+        """Full classification map as a float RGB array."""
         H, W = class_map.shape
         rgb  = np.zeros((H, W, 3), dtype=np.uint8)
         for cinfo in class_info:
             rgb[class_map == cinfo["id"]] = cinfo["color"]
-        return self._array_to_b64(rgb.astype(np.float32) / 255.0)
+        return rgb.astype(np.float32) / 255.0
+
+    def _make_cluster_overlay_array(
+        self,
+        rgb_arr: np.ndarray,
+        class_map: np.ndarray,
+        class_info: List[Dict[str, Any]],
+        alpha: float = 0.48,
+    ) -> np.ndarray:
+        """Blend assigned cluster colours over the RGB composite."""
+        colors = self._make_class_map_array(class_map, class_info)
+        assigned = np.isin(class_map, [c["id"] for c in class_info])
+        overlay = np.asarray(rgb_arr, dtype=np.float32).copy()
+        overlay[assigned] = (
+            (1.0 - float(alpha)) * overlay[assigned]
+            + float(alpha) * colors[assigned]
+        )
+        return np.clip(overlay, 0.0, 1.0)
+
+    @staticmethod
+    def _index_map_array(values: np.ndarray) -> np.ndarray:
+        """Convert a -1..1 spectral-index map to an RGB diagnostic image."""
+        arr = np.asarray(values, dtype=np.float32)
+        finite = np.isfinite(arr)
+        scaled = np.clip((np.nan_to_num(arr, nan=-1.0) + 1.0) / 2.0, 0.0, 1.0)
+        rgb = plt.get_cmap("RdYlGn")(scaled)[..., :3].astype(np.float32)
+        rgb[~finite] = (0.35, 0.35, 0.35)
+        return rgb
+
+    def _render_indices_section(
+        self,
+        index_results: Dict[str, Dict[str, Any]],
+    ) -> str:
+        if not index_results:
+            return f'<p style="color:#999;">{self._t("index_unavailable", reason="no indices selected")}</p>'
+        cards = []
+        for name in self.options.get("indices", []):
+            result = index_results.get(name, {})
+            values = result.get("values")
+            if values is None:
+                reason = html.escape(str(result.get("reason") or "unavailable"))
+                cards.append(
+                    f'<div class="class-card"><div class="cls-name">{html.escape(name)}</div>'
+                    f'<div class="cls-stats">{self._t("index_unavailable", reason=reason)}</div></div>'
+                )
+                continue
+            summary = result.get("summary") or {}
+            b64 = self._array_to_b64(self._index_map_array(values))
+            bands = result.get("bands") or {}
+            band_text = ", ".join(
+                f'{html.escape(label)} {float(info["wavelength_nm"]):.1f} nm'
+                for label, info in bands.items()
+            )
+            cards.append(
+                f'<div class="class-card"><img src="data:image/png;base64,{b64}" alt="{html.escape(name)}">'
+                f'<div class="cls-name">{html.escape(name)}</div>'
+                f'<div class="cls-stats">mean {summary.get("mean", float("nan")):.4f} &nbsp;|&nbsp; '
+                f'median {summary.get("median", float("nan")):.4f}<br>{band_text}</div></div>'
+            )
+        return f'<div class="class-img-grid">{"".join(cards)}</div>'
+
+    def _render_calibration_qc(self, calibration: Optional[Dict[str, Any]]) -> str:
+        if not calibration:
+            return f'<p style="color:#a66;">{self._t("calibration_none")}</p>'
+        meta = calibration.get("meta") or {}
+        a_value = calibration.get("a")
+        b_value = calibration.get("b")
+        a = np.asarray([] if a_value is None else a_value, dtype=float)
+        b = np.asarray([] if b_value is None else b_value, dtype=float)
+        valid = np.isfinite(a) & np.isfinite(b) if a.shape == b.shape else np.zeros(0, dtype=bool)
+        profile = Path(str(calibration.get("selected_profile") or "—")).name
+        method = str(meta.get("method") or calibration.get("calibration_type") or "—")
+        valid_text = f"{int(valid.sum())}/{len(valid)}" if len(valid) else "—"
+        warning = ""
+        if len(valid):
+            suspicious = int((~valid | (a <= 0)).sum())
+            if suspicious:
+                warning = (
+                    f'<p style="color:#b55;margin-top:10px;">⚠️ {suspicious} band(s) have '
+                    'invalid or non-positive calibration slopes.</p>'
+                )
+        return (
+            '<div class="stat-row">'
+            + self._stat_box(self._t("calibration_profile"), html.escape(profile))
+            + self._stat_box(self._t("calibration_method"), html.escape(method))
+            + self._stat_box(self._t("calibration_valid"), valid_text)
+            + '</div>'
+            + warning
+        )
+
+    def save_selected_assets(
+        self,
+        output_dir: str | Path,
+        *,
+        data: np.ndarray,
+        class_map: np.ndarray,
+        class_info: List[Dict[str, Any]],
+        wavelengths: Optional[List[float]],
+        index_results: Optional[Dict[str, Dict[str, Any]]] = None,
+    ) -> List[str]:
+        """Save report-selected diagnostic images as standalone PNG files."""
+        if not self.options.get("save_selected_images", True):
+            return []
+        from PIL import Image
+
+        out = Path(output_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        sections = self.options["sections"]
+        saved: List[str] = []
+
+        def save(name: str, array: np.ndarray) -> None:
+            target = out / name
+            encoded = np.round(np.clip(array, 0.0, 1.0) * 255.0).astype(np.uint8)
+            Image.fromarray(encoded, mode="RGB").save(target)
+            saved.append(str(target.resolve()))
+
+        rgb = None
+        if any(sections.get(key) for key in ("rgb", "cluster_overlay")):
+            rgb = self._get_rgb_array(data, wavelengths, "rgb")
+        if sections.get("rgb") and rgb is not None:
+            save("rgb.png", rgb)
+        if sections.get("false_color"):
+            save("cir.png", self._get_rgb_array(data, wavelengths, "cir"))
+        if sections.get("class_map"):
+            save("cluster_map.png", self._make_class_map_array(class_map, class_info))
+        if sections.get("cluster_overlay") and rgb is not None:
+            save(
+                "cluster_overlay.png",
+                self._make_cluster_overlay_array(rgb, class_map, class_info),
+            )
+        if sections.get("spectral_indices"):
+            for name, result in (index_results or {}).items():
+                if result.get("values") is not None:
+                    save(f"{name.lower()}.png", self._index_map_array(result["values"]))
+        return saved
 
     @staticmethod
     def _array_to_b64(arr: np.ndarray) -> str:
@@ -1122,7 +1389,9 @@ class Reporter:
         except ImportError:
             return f"<p><em>{self._t('no_chart')}</em></p>"
 
-        show_std = self.rcfg.get("spectra_show_std", True)
+        selected_stats = set(self.options.get("spectra_statistics", ["mean"]))
+        # Honour the legacy switch when it is explicitly supplied.
+        show_std = "std" in selected_stats and self.rcfg.get("spectra_show_std", True)
         fig = go.Figure()
 
         for i, s in enumerate(spectra):
@@ -1134,10 +1403,18 @@ class Reporter:
             mean  = s["mean"].tolist()
             std   = s["std"].tolist()
 
-            fig.add_trace(go.Scatter(
-                x=wl, y=mean, name=name, mode="lines",
-                line=dict(color=color_rgb, width=2.5, dash=dash),
-            ))
+            if "mean" in selected_stats:
+                fig.add_trace(go.Scatter(
+                    x=wl, y=mean, name=f"{name} · mean", mode="lines",
+                    line=dict(color=color_rgb, width=2.5, dash=dash),
+                ))
+
+            if "median" in selected_stats and s.get("median") is not None:
+                fig.add_trace(go.Scatter(
+                    x=wl, y=np.asarray(s["median"]).tolist(),
+                    name=f"{name} · median", mode="lines",
+                    line=dict(color=color_rgb, width=1.5, dash="dot"),
+                ))
 
             if show_std:
                 upper = [m + s_ for m, s_ in zip(mean, std)]
@@ -1149,6 +1426,20 @@ class Reporter:
                     fillcolor=f"rgba({r},{g},{b_},0.12)",
                     line=dict(color="rgba(255,255,255,0)"),
                     name=f"{name} ±std",
+                    showlegend=False,
+                    hoverinfo="skip",
+                ))
+
+            if "iqr" in selected_stats and s.get("q25") is not None and s.get("q75") is not None:
+                q25 = np.asarray(s["q25"]).tolist()
+                q75 = np.asarray(s["q75"]).tolist()
+                fig.add_trace(go.Scatter(
+                    x=wl + wl[::-1],
+                    y=q75 + q25[::-1],
+                    fill="toself",
+                    fillcolor=f"rgba({r},{g},{b_},0.07)",
+                    line=dict(color="rgba(255,255,255,0)"),
+                    name=f"{name} IQR",
                     showlegend=False,
                     hoverinfo="skip",
                 ))

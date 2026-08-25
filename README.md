@@ -19,6 +19,8 @@ load time. Ceres acquisition files can first be demultiplexed with
 - Box, lasso, and click-by-click polygon ROIs
 - ROI-only re-clustering when the global result is locally unsatisfactory
 - RGB overlays, cluster boundaries, isolated cluster images, CSV tables, and HTML reports
+- Quick-QC, research-standard, and custom report presets with daily batch summaries
+- Calibrated-reflectance / raw-DN ROI comparison with per-band coefficient diagnostics
 - Calibration provenance and per-wavelength empirical-line coefficients in exported CSV files
 
 ## Quick start
@@ -57,4 +59,3 @@ tables report `value_units=reflectance`, `calibration_applied=true`, and
 `normalization_mode=none`. A synthetic constant Dark is supported for rapid
 screening, but a measured sensor Dark with matching acquisition settings is
 recommended for final scientific results.
-

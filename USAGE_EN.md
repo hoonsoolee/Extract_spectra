@@ -182,8 +182,27 @@ output/
     ├── spectra_<method>.csv
     ├── spectra_<method>_reflectance.csv   # when calibration was applied
     ├── spectra_<method>_raw_dn.csv
-    └── processing_manifest.json
+    ├── processing_manifest.json
+    ├── report_config.json
+    ├── rgb.png / ndvi.png                 # when selected
+    └── cluster_map.png / cluster_overlay.png
 ```
+
+### Selectable result reports
+
+- **Quick Field QC** saves RGB, NDVI, cluster map/overlay, mean and median
+  spectra, calibration QC, and processing time. It skips expensive cluster
+  quality calculations and is the recommended screening preset.
+- **Research Standard** adds CIR, isolated cluster images, mean/median/std/IQR,
+  NDVI/GNDVI/NDRE/PRI, cluster quality, and vegetation-separation assessment.
+- **Custom** lets the user select image sections, spectral statistics,
+  vegetation indices, HTML/CSV/PNG outputs, and a batch-level daily summary.
+
+Indices are calculated only when calibrated reflectance and the required
+wavelengths are available. Raw DN or missing bands produce an explicit
+"not calculated" reason rather than an invented value. Batch mode can also
+write `daily_report_<timestamp>.html` and `daily_summary_<timestamp>.csv` with
+per-file calibration, NDVI, vegetation fraction, class count, quality, and time.
 
 `spectra_<method>.csv` contains the values actually used for clustering. When
 a profile was applied it is calibrated reflectance. The explicit
@@ -235,6 +254,15 @@ The selected spectrum is displayed as mean, median, and variability. The graph
 can be limited by wavelength and y-axis range without changing the saved CSV.
 If calibration is active, both calibrated reflectance and a raw-DN companion
 CSV are saved.
+
+With a calibration profile connected, use the buttons above the ROI chart to
+switch between **Calibrated Reflectance**, **Raw DN**, and **Raw/Calibrated
+Comparison**. Comparison mode uses separate left/right y-axes so the different
+scales do not hide spectral-shape problems. Open **Calibration suspect-band and
+coefficient diagnostics** to inspect `R = a*DN+b`, invalid or non-positive
+gains, robust gain outliers, and ROI mean reflectance outside -0.05..1.20.
+Diagnostics never rewrite the calibration; use them to review panel
+saturation, White/Dark selection, and the affected wavelengths.
 
 ## 9. One global clustering model, separate spectra per ROI
 

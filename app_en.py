@@ -22,6 +22,8 @@ import streamlit as st
 # Make sure 'src' package is importable from this directory
 sys.path.insert(0, str(Path(__file__).parent))
 
+from src.report_options import REPORT_PRESETS
+
 # ============================================================
 # Page config
 # ============================================================
@@ -529,6 +531,86 @@ with st.sidebar:
 
     st.markdown("---")
 
+    # ── Selectable report builder ────────────────────────────
+    st.markdown("### 📋 Result Report")
+    _REPORT_PRESET_LABELS = {
+        "quick_qc": "⚡ Quick Field QC (recommended)",
+        "research_standard": "🔬 Research Standard",
+        "custom": "🛠️ Custom",
+    }
+    report_preset = st.selectbox(
+        "Report preset",
+        list(_REPORT_PRESET_LABELS),
+        format_func=lambda key: _REPORT_PRESET_LABELS[key],
+        key="report_preset",
+    )
+    _report_defaults = REPORT_PRESETS[report_preset]
+    report_sections = dict(_report_defaults["sections"])
+    report_statistics = list(_report_defaults["spectra_statistics"])
+    report_indices = list(_report_defaults["indices"])
+    save_selected_images = bool(_report_defaults["save_selected_images"])
+    save_daily_summary = bool(_report_defaults["daily_summary"])
+    save_html_report = True
+    save_spectra_csv = True
+
+    with st.expander("Review / select report contents", expanded=report_preset == "custom"):
+        if report_preset != "custom":
+            st.caption(
+                "Sections: "
+                + ", ".join(key for key, enabled in report_sections.items() if enabled)
+                + "\n\nStatistics: " + ", ".join(report_statistics)
+                + " · Indices: " + (", ".join(report_indices) or "none")
+            )
+        else:
+            _section_labels = {
+                "rgb": "RGB image",
+                "false_color": "CIR false colour",
+                "spectral_indices": "Selected index maps and summaries",
+                "class_map": "Cluster map",
+                "cluster_overlay": "RGB + cluster overlay",
+                "per_class_images": "Per-cluster images",
+                "class_summary": "Cluster pixel statistics",
+                "spectral_plot": "Cluster spectra",
+                "quality_metrics": "Cluster quality and separability",
+                "vegetation_quality": "Vegetation separation assessment",
+                "calibration_qc": "Calibration provenance and valid-band QC",
+            }
+            _sc1, _sc2 = st.columns(2)
+            for _index, (_key, _label) in enumerate(_section_labels.items()):
+                with (_sc1 if _index % 2 == 0 else _sc2):
+                    report_sections[_key] = st.checkbox(
+                        _label,
+                        value=bool(report_sections.get(_key)),
+                        key=f"report_section_{_key}",
+                    )
+            report_statistics = st.multiselect(
+                "Spectral statistics",
+                ["mean", "median", "std", "iqr"],
+                default=report_statistics,
+                key="report_statistics",
+            ) or ["mean"]
+            report_indices = st.multiselect(
+                "Vegetation indices",
+                ["NDVI", "GNDVI", "NDRE", "PRI"],
+                default=report_indices,
+                key="report_indices",
+            )
+            save_html_report = st.checkbox("Save interactive HTML", True, key="report_save_html")
+            save_spectra_csv = st.checkbox("Save spectra CSV", True, key="report_save_csv")
+            save_selected_images = st.checkbox(
+                "Save selected images as PNG", True, key="report_save_images"
+            )
+            save_daily_summary = st.checkbox(
+                "Save daily batch summary HTML and CSV", True, key="report_daily_summary"
+            )
+        if report_indices:
+            st.info(
+                "Indices are calculated only from calibrated reflectance. "
+                "If calibration or required wavelengths are unavailable, the report records why."
+            )
+
+    st.markdown("---")
+
     # ── Output / misc ────────────────────────────────────────
     st.markdown("### 📁 Output")
     output_dir = st.text_input("Output folder", value="./output")
@@ -681,14 +763,20 @@ with tab_run:
             },
             "output": {
                 "dir":                     output_dir,
-                "save_classification_map": True,
-                "save_spectra_csv":        True,
-                "save_report":             True,
+                "save_classification_map": bool(report_sections.get("class_map")),
+                "save_spectra_csv":        save_spectra_csv,
+                "save_report":             save_html_report,
                 "per_file_report":         run_mode == "📦 Batch (all files)",
             },
             "report": {
                 "title":            "Hyperspectral Field Crop Analysis",
-                "spectra_show_std": True,
+                "preset":           report_preset,
+                "sections":         report_sections,
+                "spectra_statistics": report_statistics,
+                "indices":          report_indices,
+                "save_selected_images": save_selected_images,
+                "daily_summary":    save_daily_summary,
+                "spectra_show_std": "std" in report_statistics,
                 "lang":             "en",
             },
         }
@@ -736,9 +824,9 @@ with tab_run:
 
             out_p = Path(output_dir)
 
-            # Find all report_*.html files (root + per-file subdirectories)
+            # Find per-file and daily reports (root + subdirectories)
             reports = sorted(
-                out_p.rglob("report*.html"),
+                out_p.rglob("*report*.html"),
                 key=lambda p: p.stat().st_mtime,
                 reverse=True,
             )

@@ -7,6 +7,8 @@ import numpy as np
 import pandas as pd
 
 from src.roi_utils import (
+    apply_calibration,
+    calibration_diagnostics,
     display_reflectance_rgb,
     offset_region,
     polygon_region,
@@ -112,6 +114,30 @@ class RoiCsvCalibrationStatusTests(unittest.TestCase):
         self.assertEqual(frame["calibration_profile"].iloc[0], "calibration.npz")
         np.testing.assert_allclose(frame["calibration_a"], np.ones(3))
         np.testing.assert_allclose(frame["calibration_b"], np.zeros(3))
+
+
+class CalibrationDiagnosticsTests(unittest.TestCase):
+    def test_flags_nonpositive_gain_and_out_of_range_reflectance(self):
+        raw = pd.DataFrame(
+            {
+                "mean": [100.0, 100.0, 100.0],
+                "median": [100.0, 100.0, 100.0],
+                "std": [2.0, 2.0, 2.0],
+                "q25": [98.0, 98.0, 98.0],
+                "q75": [102.0, 102.0, 102.0],
+            }
+        )
+        a = np.array([0.005, -0.002, 0.020])
+        b = np.zeros(3)
+        corrected = apply_calibration(raw, a, b)
+        diagnostics = calibration_diagnostics(
+            raw, corrected, a, b, wavelengths=[500, 600, 700]
+        )
+        self.assertFalse(bool(diagnostics.loc[0, "suspect"]))
+        self.assertTrue(bool(diagnostics.loc[1, "suspect"]))
+        self.assertIn("non-positive", diagnostics.loc[1, "diagnostic"])
+        self.assertTrue(bool(diagnostics.loc[2, "suspect"]))
+        self.assertIn("outside", diagnostics.loc[2, "diagnostic"])
 
 
 if __name__ == "__main__":

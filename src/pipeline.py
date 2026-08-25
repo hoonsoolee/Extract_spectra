@@ -7,10 +7,11 @@ classifier → extractor → reporter for a batch of hyperspectral files.
 
 import logging
 import json
+import csv
 import time
 import traceback
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
 from .data_loader import HyperspectralLoader
 from .preprocessor import Preprocessor
@@ -18,6 +19,7 @@ from .classifier import HyperspectralClassifier
 from .spectrum_extractor import SpectrumExtractor
 from .reporter import Reporter
 from .evaluator import Evaluator
+from .spectral_indices import compute_selected_indices
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +47,7 @@ class Pipeline:
         self.extr    = SpectrumExtractor(config)
         _lang = config.get("report", {}).get("lang", "ko")
         self.reporter = Reporter(config, lang=_lang)
+        self.batch_summaries: List[dict] = []
 
         out_cfg = config.get("output", {})
         self.output_dir = Path(out_cfg.get("dir", "./output"))
@@ -73,6 +76,8 @@ class Pipeline:
         data_cfg = self.config.get("data", {})
         out_cfg  = self.config.get("output", {})
         per_file_report = out_cfg.get("per_file_report", False)
+        self.batch_summaries = []
+        self.reporter.results.clear()
 
         # ── File discovery ─────────────────────────────────────────
         if single_file:
@@ -105,7 +110,7 @@ class Pipeline:
             logger.info(f"{'='*60}")
 
             try:
-                self._process_file(source, file_ref, data_cfg, labels_csv)
+                summary = self._process_file(source, file_ref, data_cfg, labels_csv)
                 ok += 1
 
                 # ── Per-file report (batch mode with individual reports) ──
@@ -116,8 +121,12 @@ class Pipeline:
                     method       = self.config.get("classification", {}).get("method", "unknown")
                     file_out_dir = self.output_dir / stem
                     file_out_dir.mkdir(parents=True, exist_ok=True)
-                    self.reporter.render(file_out_dir / f"report_{ts}_{method}.html")
+                    detail_report = file_out_dir / f"report_{ts}_{method}.html"
+                    self.reporter.render(detail_report)
+                    summary["detail_report"] = str(detail_report.resolve())
                     self.reporter.results.clear()   # reset for next file
+
+                self.batch_summaries.append(summary)
 
             except Exception as e:
                 logger.error(f"FAILED: {fname}\n{traceback.format_exc()}")
@@ -145,6 +154,28 @@ class Pipeline:
             else:
                 report_path = self.output_dir / f"report_{ts}_{method}.html"
             self.reporter.render(report_path)
+            if len(self.batch_summaries) == 1:
+                self.batch_summaries[0]["detail_report"] = str(report_path.resolve())
+
+        if (
+            not single_file
+            and self.batch_summaries
+            and out_cfg.get("save_report", True)
+            and self.reporter.options.get("daily_summary", True)
+        ):
+            ts = time.strftime("%Y%m%d_%H%M%S")
+            csv_path = self.output_dir / f"daily_summary_{ts}.csv"
+            html_path = self.output_dir / f"daily_report_{ts}.html"
+            columns = [
+                "filename", "source_file", "value_units", "calibration_profile",
+                "n_classes", "ndvi_mean", "ndvi_median", "vegetation_fraction",
+                "silhouette", "davies_bouldin", "elapsed_seconds", "detail_report",
+            ]
+            with csv_path.open("w", newline="", encoding="utf-8-sig") as stream:
+                writer = csv.DictWriter(stream, fieldnames=columns, extrasaction="ignore")
+                writer.writeheader()
+                writer.writerows(self.batch_summaries)
+            self.reporter.render_daily_summary(self.batch_summaries, html_path)
 
     # ============================================================
     # Process a single file
@@ -156,7 +187,7 @@ class Pipeline:
         file_ref,
         data_cfg: dict,
         labels_csv: Optional[str],
-    ) -> None:
+    ) -> dict:
         fname    = Path(file_ref).name
         stem     = Path(file_ref).stem
         t_file   = time.time()   # wall-clock start for total elapsed
@@ -192,23 +223,28 @@ class Pipeline:
 
         # ---- 3b. Quality metrics ----
         t0 = time.time()
-        metrics = Evaluator.unsupervised_metrics(data, class_map)
-        sil = metrics.get("silhouette")
-        sil_str = f"{sil:.3f}" if sil is not None else "N/A"
-        logger.info(
-            f"  Silhouette: {sil_str}  "
-            f"DB: {metrics.get('davies_bouldin') or 'N/A'}  "
-            f"-> {metrics.get('interpretation', '')}"
-        )
-        # Merge supervised validation accuracy if available
-        if self.clf.last_val_metrics:
-            metrics.update(self.clf.last_val_metrics)
-            acc = self.clf.last_val_metrics.get("accuracy")
-            if acc is not None:
-                logger.info(
-                    f"  Supervised val accuracy: {acc:.3f}  "
-                    f"F1: {self.clf.last_val_metrics.get('macro_f1', 'N/A')}"
-                )
+        report_sections = self.reporter.options["sections"]
+        metrics: Dict[str, Any] = {}
+        if report_sections.get("quality_metrics"):
+            metrics = Evaluator.unsupervised_metrics(data, class_map)
+            sil = metrics.get("silhouette")
+            sil_str = f"{sil:.3f}" if sil is not None else "N/A"
+            logger.info(
+                f"  Silhouette: {sil_str}  "
+                f"DB: {metrics.get('davies_bouldin') or 'N/A'}  "
+                f"-> {metrics.get('interpretation', '')}"
+            )
+            # Merge supervised validation accuracy if available
+            if self.clf.last_val_metrics:
+                metrics.update(self.clf.last_val_metrics)
+                acc = self.clf.last_val_metrics.get("accuracy")
+                if acc is not None:
+                    logger.info(
+                        f"  Supervised val accuracy: {acc:.3f}  "
+                        f"F1: {self.clf.last_val_metrics.get('macro_f1', 'N/A')}"
+                    )
+        else:
+            logger.info("  Quality metrics skipped by report selection")
         logger.info(f"  Evaluate: {time.time()-t0:.2f}s")
 
         # ---- 4. Extract spectra ----
@@ -220,17 +256,32 @@ class Pipeline:
         logger.info(f"  Extract spectra: {time.time()-t0:.2f}s")
 
         # ---- 4b. Spectral separability ----
-        sep = Evaluator.spectral_separability(spectra)
+        sep = (
+            Evaluator.spectral_separability(spectra)
+            if report_sections.get("quality_metrics") else {}
+        )
 
         # ---- 4c. Vegetation separation quality ----
-        veg_sep = Evaluator.vegetation_separation_metrics(
-            data, class_map, spectra, wavelengths
+        veg_sep = (
+            Evaluator.vegetation_separation_metrics(
+                data, class_map, spectra, wavelengths
+            )
+            if report_sections.get("vegetation_quality") else {}
         )
         if veg_sep.get("ndvi_f1") is not None:
             logger.info(
                 f"  Vegetation F1: {veg_sep['ndvi_f1']:.3f}  "
                 f"Recall: {veg_sep['ndvi_recall']:.3f}  "
                 f"Precision: {veg_sep['ndvi_precision']:.3f}"
+            )
+
+        index_results: Dict[str, Dict[str, Any]] = {}
+        if report_sections.get("spectral_indices"):
+            index_results = compute_selected_indices(
+                data,
+                wavelengths,
+                self.reporter.options.get("indices", []),
+                is_reflectance=bool(self.prep.last_calibration_info),
             )
 
         # ---- 5. Save outputs ----
@@ -306,15 +357,35 @@ class Pipeline:
                 if self.prep.last_effective_normalize_mode == "none"
                 else f"normalized ({self.prep.last_effective_normalize_mode})"
             ),
-            "raw_spectra_file": f"spectra_{method}_raw_dn.csv",
-            "processed_spectra_file": f"spectra_{method}.csv",
+            "raw_spectra_file": (
+                f"spectra_{method}_raw_dn.csv"
+                if out_cfg.get("save_spectra_csv", True) else None
+            ),
+            "processed_spectra_file": (
+                f"spectra_{method}.csv"
+                if out_cfg.get("save_spectra_csv", True) else None
+            ),
             "reflectance_spectra_file": (
                 f"spectra_{method}_reflectance.csv"
-                if self.prep.last_calibration_info else None
+                if self.prep.last_calibration_info
+                and out_cfg.get("save_spectra_csv", True) else None
             ),
+            "report_options": self.reporter.options,
+            "spectral_indices": {
+                name: {
+                    key: value
+                    for key, value in result.items()
+                    if key != "values"
+                }
+                for name, result in index_results.items()
+            },
         }
         (file_out_dir / "processing_manifest.json").write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        (file_out_dir / "report_config.json").write_text(
+            json.dumps(self.reporter.options, ensure_ascii=False, indent=2),
+            encoding="utf-8",
         )
 
         if out_cfg.get("save_classification_map", True):
@@ -322,6 +393,16 @@ class Pipeline:
                 class_map, class_info,
                 file_out_dir / f"class_map_{method}.png"
             )
+
+        report_assets = self.reporter.save_selected_assets(
+            file_out_dir,
+            data=data,
+            class_map=class_map,
+            class_info=class_info,
+            wavelengths=wavelengths,
+            index_results=index_results,
+        )
+        manifest["report_assets"] = report_assets
 
         # ---- 6. Add to report ----
         elapsed_sec = time.time() - t_file
@@ -332,21 +413,41 @@ class Pipeline:
             json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
         )
 
-        self.reporter.add_result(
-            filename=fname,
-            data=data,
-            class_map=class_map,
-            class_info=class_info,
-            spectra=spectra,
-            wavelengths=wavelengths,
-            metadata={**meta, "calibration": self.prep.last_calibration_info},
-            metrics=metrics,
-            separability=sep,
-            veg_sep=veg_sep,
-            elapsed_sec=elapsed_sec,
-        )
+        if out_cfg.get("save_report", True):
+            self.reporter.add_result(
+                filename=fname,
+                data=data,
+                class_map=class_map,
+                class_info=class_info,
+                spectra=spectra,
+                wavelengths=wavelengths,
+                metadata={**meta, "calibration": self.prep.last_calibration_info},
+                metrics=metrics,
+                separability=sep,
+                veg_sep=veg_sep,
+                elapsed_sec=elapsed_sec,
+                index_results=index_results,
+            )
 
         logger.info(f"  Outputs saved to: {file_out_dir}")
+        calibration_info = self.prep.last_calibration_info or {}
+        ndvi = index_results.get("NDVI") or {}
+        ndvi_summary = ndvi.get("summary") or {}
+        profile = calibration_info.get("selected_profile") or ""
+        return {
+            "filename": fname,
+            "source_file": str(Path(file_ref).resolve()) if source == "local" else str(file_ref),
+            "value_units": manifest["value_units"],
+            "calibration_profile": Path(str(profile)).name if profile else "",
+            "n_classes": len(class_info),
+            "ndvi_mean": ndvi_summary.get("mean", ""),
+            "ndvi_median": ndvi_summary.get("median", ""),
+            "vegetation_fraction": ndvi_summary.get("fraction_above_0_15", ""),
+            "silhouette": metrics.get("silhouette", "") if metrics else "",
+            "davies_bouldin": metrics.get("davies_bouldin", "") if metrics else "",
+            "elapsed_seconds": elapsed_sec,
+            "detail_report": "",
+        }
 
     # ============================================================
     # File discovery
