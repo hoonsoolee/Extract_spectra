@@ -12,8 +12,9 @@ python main.py --local-folder ./data
 # Process from GitHub repo
 python main.py --github-repo owner/reponame --github-folder data/2024
 
-# Override method
-python main.py --local-folder ./data --method kmeans --n-clusters 8
+# Override method and number of classes
+python main.py --local-folder ./data --method kmeans --n-classes 8
+python main.py --local-folder ./data --method hybrid --n-classes 9
 
 # Use supervised classification (requires labelled pixels CSV)
 python main.py --local-folder ./data --method supervised --labels labels.csv
@@ -41,11 +42,15 @@ import yaml
 def setup_logging(verbose: bool = False) -> None:
     level = logging.DEBUG if verbose else logging.INFO
     fmt = "%(asctime)s  %(levelname)-7s  %(message)s"
+    # Windows 콘솔은 UTF-8로 강제 설정
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.stream.reconfigure(encoding="utf-8", errors="replace") \
+        if hasattr(stream_handler.stream, "reconfigure") else None
     logging.basicConfig(
         level=level,
         format=fmt,
         handlers=[
-            logging.StreamHandler(sys.stdout),
+            stream_handler,
             logging.FileHandler("pipeline.log", encoding="utf-8"),
         ],
     )
@@ -88,8 +93,24 @@ def merge_cli_into_config(cfg: dict, args: argparse.Namespace) -> dict:
     if args.method:
         clf_cfg["method"] = args.method
 
-    if args.n_clusters is not None:
-        clf_cfg.setdefault("kmeans", {})["n_clusters"] = args.n_clusters
+    if args.n_classes is not None:
+        n = args.n_classes
+        # kmeans: use directly
+        clf_cfg.setdefault("kmeans", {})["n_clusters"] = n
+        # hybrid: distribute evenly across the 3 main segments
+        base = max(1, n // 3)
+        r    = n % 3
+        clf_cfg.setdefault("hybrid", {}).update({
+            "n_clusters_sunlit": base + (1 if r >= 1 else 0),
+            "n_clusters_shadow": base + (1 if r >= 2 else 0),
+            "n_clusters_soil":   base,
+        })
+        logger.info(
+            f"n-classes={n} → "
+            f"sunlit={base+(1 if r>=1 else 0)}, "
+            f"shadow={base+(1 if r>=2 else 0)}, "
+            f"soil={base}"
+        ) if False else None  # logged in pipeline
 
     if args.ndvi_threshold is not None:
         clf_cfg.setdefault("hybrid", {})["ndvi_threshold"] = args.ndvi_threshold
@@ -133,12 +154,25 @@ def main() -> None:
     clf = parser.add_argument_group("Classification")
     clf.add_argument(
         "--method",
-        choices=["hybrid", "kmeans", "supervised"],
-        help="Classification method (overrides config.yaml)",
+        choices=["hybrid", "kmeans", "sam", "supervised", "autoencoder", "cnn"],
+        help=(
+            "Classification method (overrides config.yaml)\n"
+            "  hybrid      : NDVI+brightness rules -> K-means (no labels)\n"
+            "  kmeans      : PCA + K-means (no labels)\n"
+            "  sam         : Spectral Angle Mapper - brightness-invariant (no labels OR --labels)\n"
+            "  autoencoder : Spectral AE -> latent K-means (no labels, deep)\n"
+            "  supervised  : Random Forest (needs --labels CSV)\n"
+            "  cnn         : 1D-CNN (needs --labels CSV, deep)\n"
+        ),
     )
     clf.add_argument(
-        "--n-clusters", type=int, metavar="N",
-        help="Number of K-means clusters (kmeans method)",
+        "--n-classes", type=int, metavar="N",
+        help=(
+            "Total number of output classes/clusters.\n"
+            "  hybrid : distributed across sunlit/shadow/soil segments\n"
+            "           (e.g. 9 → 3 sub-clusters each)\n"
+            "  kmeans : used directly as n_clusters"
+        ),
     )
     clf.add_argument(
         "--ndvi-threshold", type=float, metavar="FLOAT",
@@ -214,7 +248,45 @@ def main() -> None:
 
     log.info("Hyperspectral pipeline starting")
     log.info(f"Config: {args.config}")
-    log.info(f"Method: {cfg.get('classification', {}).get('method', 'hybrid')}")
+    clf_info = cfg.get("classification", {})
+    method   = clf_info.get("method", "hybrid")
+    log.info(f"Method: {method}")
+
+    # ── 클래스 수 입력 ──────────────────────────────────────────
+    # --n-classes 가 주어지지 않으면 대화형으로 묻습니다.
+    if args.n_classes is None:
+        default_n = clf_info.get("kmeans", {}).get("n_clusters", 6)
+        try:
+            raw = input(
+                f"\n클래스(클러스터) 수를 입력하세요 "
+                f"[기본값 {default_n}]: "
+            ).strip()
+            n_classes = int(raw) if raw else default_n
+        except (ValueError, EOFError):
+            n_classes = default_n
+            print(f"  잘못된 입력 → 기본값 {default_n} 사용")
+
+        # config에 반영
+        base = max(1, n_classes // 3)
+        r_   = n_classes % 3
+        clf_cfg = cfg.setdefault("classification", {})
+        clf_cfg.setdefault("kmeans", {})["n_clusters"] = n_classes
+        clf_cfg.setdefault("hybrid", {}).update({
+            "n_clusters_sunlit": base + (1 if r_ >= 1 else 0),
+            "n_clusters_shadow": base + (1 if r_ >= 2 else 0),
+            "n_clusters_soil":   base,
+        })
+        print(
+            f"  -> 클래스 수: {n_classes}  "
+            f"(kmeans={n_classes}, "
+            f"hybrid: sunlit={base+(1 if r_>=1 else 0)}, "
+            f"shadow={base+(1 if r_>=2 else 0)}, "
+            f"soil={base})\n"
+        )
+    else:
+        n_classes = args.n_classes
+    log.info(f"n-classes: {n_classes}")
+    # ────────────────────────────────────────────────────────────
 
     pipeline = Pipeline(cfg)
     pipeline.run(

@@ -6,6 +6,7 @@ classifier → extractor → reporter for a batch of hyperspectral files.
 """
 
 import logging
+import json
 import time
 import traceback
 from pathlib import Path
@@ -33,7 +34,12 @@ class Pipeline:
 
     def __init__(self, config: dict):
         self.config  = config
-        self.loader  = HyperspectralLoader(config.get("data", {}))
+        # Give the loader the downsample factor so huge ENVI cubes are
+        # subsampled at read time (memmap) instead of after a full load.
+        loader_cfg = dict(config.get("data", {}))
+        loader_cfg["spatial_downsample"] = \
+            config.get("preprocessing", {}).get("spatial_downsample", 1)
+        self.loader  = HyperspectralLoader(loader_cfg)
         self.prep    = Preprocessor(config)
         self.clf     = HyperspectralClassifier(config)
         self.extr    = SpectrumExtractor(config)
@@ -167,10 +173,16 @@ class Pipeline:
                 token=gh.get("token"),
             )
         logger.info(f"  Load: {time.time()-t0:.2f}s")
+        raw_data = data
+        raw_wavelengths = meta.get("wavelengths")
 
         # ---- 2. Preprocess ----
         t0 = time.time()
-        data, wavelengths = self.prep.process(data, meta.get("wavelengths"))
+        data, wavelengths = self.prep.process(
+            data, meta.get("wavelengths"),
+            skip_downsample=meta.get("downsample_applied", 1) > 1,
+            source_path=str(file_ref),
+        )
         logger.info(f"  Preprocess: {time.time()-t0:.2f}s")
 
         # ---- 3. Classify ----
@@ -202,6 +214,9 @@ class Pipeline:
         # ---- 4. Extract spectra ----
         t0 = time.time()
         spectra = self.extr.extract(data, class_map, class_info, wavelengths)
+        raw_spectra = self.extr.extract(
+            raw_data, class_map, class_info, raw_wavelengths
+        )
         logger.info(f"  Extract spectra: {time.time()-t0:.2f}s")
 
         # ---- 4b. Spectral separability ----
@@ -226,10 +241,81 @@ class Pipeline:
 
         if out_cfg.get("save_spectra_csv", True):
             csv_name = f"spectra_{method}.csv"
+            calibration_info = self.prep.last_calibration_info
+            effective_normalization = self.prep.last_effective_normalize_mode
+            corrected_units = (
+                "reflectance"
+                if calibration_info
+                else "raw DN" if effective_normalization == "none"
+                else f"normalized ({effective_normalization})"
+            )
+            corrected_provenance = {
+                "source_file": str(file_ref),
+                "value_units": corrected_units,
+                "normalization_mode": effective_normalization,
+                "calibration_info": calibration_info,
+                "calibration_applied": bool(calibration_info),
+                "coefficients_a": (
+                    calibration_info.get("a") if calibration_info else None
+                ),
+                "coefficients_b": (
+                    calibration_info.get("b") if calibration_info else None
+                ),
+            }
+            raw_provenance = {
+                "source_file": str(file_ref),
+                "value_units": "raw DN",
+                "normalization_mode": "none",
+                "calibration_info": calibration_info,
+                "calibration_applied": False,
+            }
             # Column prefix includes both image stem and method so merged
             # CSVs from different files/methods never collide.
             self.extr.save_csv(spectra, file_out_dir / csv_name,
-                               file_stem=f"{stem}_{method}")
+                               file_stem=f"{stem}_{method}",
+                               provenance=corrected_provenance)
+            self.extr.save_csv(
+                raw_spectra,
+                file_out_dir / f"spectra_{method}_raw_dn.csv",
+                file_stem=f"{stem}_{method}_raw_dn",
+                provenance=raw_provenance,
+            )
+            processed_kind = (
+                "reflectance"
+                if calibration_info
+                else "processed"
+            )
+            self.extr.save_csv(
+                spectra,
+                file_out_dir / f"spectra_{method}_{processed_kind}.csv",
+                file_stem=f"{stem}_{method}_{processed_kind}",
+                provenance=corrected_provenance,
+            )
+
+        manifest = {
+            "source_file": str(Path(file_ref).resolve()) if source == "local" else str(file_ref),
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "method": method,
+            "normalization": self.prep.last_effective_normalize_mode,
+            "requested_normalization": self.config.get("preprocessing", {}).get("normalize_mode", "global"),
+            "calibration": self.prep.last_calibration_info,
+            "value_units": (
+                "reflectance"
+                if self.prep.last_calibration_info
+                else "raw DN"
+                if self.prep.last_effective_normalize_mode == "none"
+                else f"normalized ({self.prep.last_effective_normalize_mode})"
+            ),
+            "raw_spectra_file": f"spectra_{method}_raw_dn.csv",
+            "processed_spectra_file": f"spectra_{method}.csv",
+            "reflectance_spectra_file": (
+                f"spectra_{method}_reflectance.csv"
+                if self.prep.last_calibration_info else None
+            ),
+        }
+        (file_out_dir / "processing_manifest.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
 
         if out_cfg.get("save_classification_map", True):
             self._save_class_map(
@@ -240,6 +326,11 @@ class Pipeline:
         # ---- 6. Add to report ----
         elapsed_sec = time.time() - t_file
         logger.info(f"  Total elapsed: {elapsed_sec:.1f}s")
+        manifest["elapsed_seconds"] = elapsed_sec
+        manifest["completed_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+        (file_out_dir / "processing_manifest.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
 
         self.reporter.add_result(
             filename=fname,
@@ -248,7 +339,7 @@ class Pipeline:
             class_info=class_info,
             spectra=spectra,
             wavelengths=wavelengths,
-            metadata=meta,
+            metadata={**meta, "calibration": self.prep.last_calibration_info},
             metrics=metrics,
             separability=sep,
             veg_sep=veg_sep,

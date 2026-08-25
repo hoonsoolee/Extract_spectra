@@ -79,6 +79,7 @@ class HyperspectralClassifier:
         self.classes = self.cfg.get("classes", [])
         # Populated by supervised/cnn methods; read by Pipeline after classify()
         self.last_val_metrics: dict = {}
+        self.last_base_class_map = None
 
     # ============================================================
     # Public entry point
@@ -103,6 +104,7 @@ class HyperspectralClassifier:
         class_info   : list of dicts {id, name, color, n_pixels, fraction}
         """
         method = self.cfg.get("method", "hybrid")
+        self.last_base_class_map = None
         logger.info(f"  Classification method: {method}")
 
         if method == "hybrid":
@@ -175,6 +177,9 @@ class HyperspectralClassifier:
             f"soil: {(class_map==SOIL).sum():,}, "
             f"bg: {(class_map==BACKGROUND).sum():,}"
         )
+
+        # Keep the interpretable pre-refinement map for visual validation.
+        self.last_base_class_map = class_map.copy()
 
         # --- 3. Optional K-means refinement within each segment ---
         if cfg.get("kmeans_refinement", True):

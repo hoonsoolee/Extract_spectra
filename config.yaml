@@ -19,8 +19,23 @@ data:
 
 # --- Preprocessing ---
 preprocessing:
+  # Reuse a conservatively named, band-compatible profile from the source
+  # folder or output/calibration when no calibration_file is explicitly set.
+  auto_discover_calibration: true
+  calibration_search_roots: ["./output"]
+
   # Reflectance normalization
   normalize: true             # Clip and scale data to [0, 1]
+  # How the scaling is done:
+  #   global   – one divisor for the whole cube. Spectral shape and band
+  #              ratios (NDVI, SAM) are preserved exactly. Use this whenever
+  #              the extracted spectra are the scientific product.
+  #   per_band – independent 1-99 percentile stretch per band. Higher contrast
+  #              for display/clustering, but each band gets a different gain,
+  #              so spectral shape is distorted and cannot be compared with
+  #              reference spectra.
+  #   none     – leave raw DN values untouched.
+  normalize_mode: "global"
   data_scale: null            # If raw DN values, divide by this (e.g., 10000 for Sentinel-2)
 
   # Bad band / water absorption removal (wavelength ranges in nm)

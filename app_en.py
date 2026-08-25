@@ -477,6 +477,58 @@ with st.sidebar:
 
     st.markdown("---")
 
+    # ── Normalization ────────────────────────────────────────
+    st.markdown("### 📐 Normalization")
+    _NORM_MODES = {
+        "global":   "Global scale (preserves spectral shape)",
+        "per_band": "Per-band stretch (maximises contrast)",
+        "none":     "None (raw DN)",
+    }
+    normalize_mode = st.selectbox(
+        "Normalization mode",
+        list(_NORM_MODES.keys()),
+        format_func=lambda k: _NORM_MODES[k],
+        index=0,
+        label_visibility="collapsed",
+        help=(
+            "Global scale: divides the whole cube by one number, so spectral "
+            "shape and band ratios such as NDVI are preserved exactly. Use this "
+            "when the extracted spectra are the product.\n\n"
+            "Per-band stretch: each band gets its own gain — good contrast, but "
+            "spectral shape is distorted and not comparable to reference "
+            "spectra.\n\n"
+            "None: keeps raw sensor DN values."
+        ),
+    )
+    if normalize_mode == "per_band":
+        st.warning(
+            "⚠️ Per-band stretch applies a different gain to every band, which "
+            "distorts spectral shape. Use **Global scale** if the spectra will "
+            "be compared against libraries or published."
+        )
+    if normalize_mode == "none":
+        st.info(
+            "ℹ️ With raw DN the Hybrid brightness threshold (default 0.08) no "
+            "longer matches the value scale. Adjust it to your data."
+        )
+
+    st.markdown("---")
+
+    # ── Large-file handling ──────────────────────────────────
+    st.markdown("### ⚡ Large Files")
+    spatial_downsample = st.select_slider(
+        "Spatial downsampling (1 = full resolution)",
+        options=[1, 2, 4, 8],
+        value=1,
+        help=(
+            "N keeps 1 pixel per N×N block, cutting memory to 1/N². "
+            "Recommended: 4 for multi-GB files. Spectral shape is preserved; "
+            "only the classification map resolution is reduced."
+        ),
+    )
+
+    st.markdown("---")
+
     # ── Output / misc ────────────────────────────────────────
     st.markdown("### 📁 Output")
     output_dir = st.text_input("Output folder", value="./output")
@@ -561,11 +613,14 @@ with tab_run:
                 "cache_dir": "./cache",
             },
             "preprocessing": {
-                "normalize":          True,
+                "auto_discover_calibration": True,
+                "calibration_search_roots": [output_dir],
+                "normalize":          normalize_mode != "none",
+                "normalize_mode":     normalize_mode,
                 "remove_bad_bands":   True,
                 "bad_band_ranges":    [[1340, 1460], [1790, 1960]],
                 "smooth_spectra":     False,
-                "spatial_downsample": 1,
+                "spatial_downsample": int(spatial_downsample),
             },
             "classification": {
                 "method": method,

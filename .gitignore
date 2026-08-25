@@ -16,8 +16,17 @@ env/
 
 # Pipeline outputs (generated files)
 output/
+output_fixed/
+roi_cluster_output/
 cache/
+roi_spectrum.csv
 *.log
+
+# Large local acquisitions (existing tracked examples are unaffected)
+*.ceres
+
+# Machine-specific assistant settings may contain credentials
+.claude/settings.local.json
 
 # IDE
 .vscode/

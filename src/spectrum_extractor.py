@@ -119,6 +119,7 @@ class SpectrumExtractor:
         spectra: List[Dict[str, Any]],
         path: str | Path,
         file_stem: Optional[str] = None,
+        provenance: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Save spectra to a wide-format CSV file.
 
@@ -169,9 +170,13 @@ class SpectrumExtractor:
             rows[f"{tag}_mna"]     = s["mna"]
             rows[f"{tag}_sam_avg"] = s["sam_avg"]
 
-        df = pd.DataFrame(rows, index=index_col)
-        df.index.name = index_name
-        df.to_csv(path)
+        df = pd.DataFrame(rows)
+        df.insert(0, index_name, index_col)
+        if provenance:
+            from .calibration_provenance import add_calibration_provenance
+
+            df = add_calibration_provenance(df, **provenance)
+        df.to_csv(path, index=False)
         logger.info(f"  Spectra CSV saved: {path}  (prefix='{prefix or 'none'}')")
 
     # ============================================================

@@ -23,6 +23,7 @@ class HyperspectralLoader:
     """Load hyperspectral files from a local folder or GitHub repository."""
 
     SUPPORTED_EXTS = {".hdr", ".tif", ".tiff", ".h5", ".hdf5", ".mat"}
+    ENVI_DATA_EXTS = {".bil", ".bip", ".bsq", ".raw", ".img", ".dat"}
 
     def __init__(self, config: dict):
         self.config = config
@@ -104,6 +105,20 @@ class HyperspectralLoader:
 
         if ext == ".hdr":
             return self._load_envi(path)
+        elif ext in self.ENVI_DATA_EXTS:
+            # A user naturally selects the large binary they want to analyse,
+            # while SPy normally expects the small ENVI header as its entry
+            # point.  Support both common naming conventions:
+            #   image.bil + image.hdr
+            #   image.bil + image.bil.hdr
+            candidates = [path.with_suffix(".hdr"), Path(str(path) + ".hdr")]
+            hdr_path = next((p for p in candidates if p.is_file()), None)
+            if hdr_path is None:
+                tried = ", ".join(str(p) for p in candidates)
+                raise FileNotFoundError(
+                    f"ENVI header not found for {path.name}. Tried: {tried}"
+                )
+            return self._load_envi(hdr_path, data_path=path)
         elif ext in {".tif", ".tiff"}:
             return self._load_tiff(path)
         elif ext in {".h5", ".hdf5"}:
@@ -127,14 +142,34 @@ class HyperspectralLoader:
     # Private: format-specific loaders
     # ============================================================
 
-    def _load_envi(self, hdr_path: Path) -> HsiData:
+    def _load_envi(self, hdr_path: Path, data_path: Optional[Path] = None) -> HsiData:
         try:
             import spectral
         except ImportError:
             raise ImportError("spectral (SPy) required: pip install spectral")
 
-        img = spectral.open_image(str(hdr_path))
-        data = np.array(img.load(), dtype=np.float32)  # (H, W, B)
+        if data_path is not None:
+            # Supplying the binary explicitly avoids relying on SPy's filename
+            # guessing (which cannot infer every .hdr/.bil naming convention).
+            img = spectral.envi.open(str(hdr_path), str(data_path))
+        else:
+            img = spectral.open_image(str(hdr_path))
+        factor = int(self.config.get("spatial_downsample", 1))
+
+        # Memory-mapped view (H, W, B) — nothing is read from disk yet.
+        # Downsampling is applied on the memmap slice so only the needed
+        # pixels are ever read into RAM (critical for multi-GB cubes).
+        mm = img.open_memmap(interleave="bip")
+        full_shape = mm.shape
+        if factor > 1:
+            mm = mm[::factor, ::factor, :]
+
+        est_gb = mm.size * 4 / 1024**3
+        logger.info(
+            f"  ENVI memmap: full {full_shape}, downsample x{factor} "
+            f"-> {mm.shape} (~{est_gb:.1f} GB as float32)"
+        )
+        data = np.asarray(mm, dtype=np.float32)
 
         wavelengths = None
         if img.bands and img.bands.centers:
@@ -142,10 +177,14 @@ class HyperspectralLoader:
 
         metadata = {
             "format": "ENVI",
-            "filename": hdr_path.name,
+            "filename": data_path.name if data_path is not None else hdr_path.name,
+            "header_file": str(hdr_path),
+            "data_file": str(data_path) if data_path is not None else None,
             "shape": data.shape,
+            "full_shape": full_shape,
             "wavelengths": wavelengths,
             "n_bands": data.shape[2],
+            "downsample_applied": factor,
         }
         logger.info(f"  ENVI loaded: {data.shape}, wavelengths={'yes' if wavelengths else 'no'}")
         return data, metadata

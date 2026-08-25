@@ -8,6 +8,8 @@ Run with:
 """
 
 import logging
+import importlib
+import re
 import sys
 import traceback
 from collections import Counter
@@ -18,9 +20,22 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 import streamlit as st
+from streamlit_image_coordinates import streamlit_image_coordinates
 
 # Make sure 'src' package is importable from this directory
 sys.path.insert(0, str(Path(__file__).parent))
+
+from src.timing import (
+    estimate_seconds as _estimate_seconds,
+    file_work_units as _file_work_units,
+    format_duration as _format_duration,
+    format_estimate as _format_estimate,
+)
+from src.path_picker import (
+    choose_directory as _choose_directory,
+    choose_file as _choose_file,
+    native_dialogs_available as _native_dialogs_available,
+)
 
 # ============================================================
 # Page config
@@ -33,6 +48,18 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# Replace Streamlit's filename-based navigation ("app") with research-facing
+# labels that explain what each screen does.
+st.markdown(
+    "<style>[data-testid='stSidebarNav']{display:none}</style>",
+    unsafe_allow_html=True,
+)
+with st.sidebar:
+    st.markdown("### 🧭 분석 화면")
+    st.page_link("app.py", label="🌿 전체 필드 자동 분석")
+    st.page_link("pages/2_구역별_클러스터링.py", label="🗺️ ROI 구역 분석·재클러스터링")
+    st.divider()
+
 # ============================================================
 # Custom log handler – collects records for display
 # ============================================================
@@ -44,6 +71,73 @@ class _ListLogHandler(logging.Handler):
 
     def emit(self, record):
         self.lines.append(self.format(record))
+
+
+_LOCAL_HSI_EXTS = {".hdr", ".tif", ".tiff", ".h5", ".hdf5", ".mat"}
+_ROI_PLOTLY_CONFIG = {
+    "scrollZoom": True,
+    "displaylogo": False,
+    "modeBarButtonsToAdd": ["select2d", "lasso2d"],
+}
+
+
+@st.cache_data(show_spinner=False, ttl=30)
+def _scan_local_hsi_files(folder: str) -> tuple[str, ...]:
+    """List local hyperspectral entry files without loading their pixels."""
+    root = Path(folder).expanduser()
+    if not root.is_dir():
+        return ()
+    return tuple(
+        str(path)
+        for path in sorted(
+            file for file in root.rglob("*")
+            if file.is_file() and file.suffix.lower() in _LOCAL_HSI_EXTS
+        )
+    )
+
+
+def _browse_directory_into_state(
+    target_key: str,
+    title: str,
+    *,
+    set_values: dict | None = None,
+) -> None:
+    """Streamlit callback: choose a local folder before the script reruns."""
+    try:
+        selected = _choose_directory(title, st.session_state.get(target_key, ""))
+        if selected:
+            st.session_state[target_key] = selected
+            for key, value in (set_values or {}).items():
+                st.session_state[key] = value
+            st.session_state["path_picker_notice"] = f"선택됨: {selected}"
+    except Exception as exc:
+        st.session_state["path_picker_error"] = str(exc)
+
+
+def _browse_file_into_state(
+    target_key: str,
+    title: str,
+    *,
+    set_values: dict | None = None,
+) -> None:
+    """Streamlit callback: choose a local HSI/calibration file."""
+    try:
+        selected = _choose_file(
+            title,
+            st.session_state.get(target_key, ""),
+            filetypes=(
+                ("초분광/ENVI", "*.hdr *.bil *.bip *.bsq *.raw *.img *.dat"),
+                ("보정/데이터", "*.npz *.h5 *.hdf5 *.mat *.tif *.tiff"),
+                ("모든 파일", "*.*"),
+            ),
+        )
+        if selected:
+            st.session_state[target_key] = selected
+            for key, value in (set_values or {}).items():
+                st.session_state[key] = value
+            st.session_state["path_picker_notice"] = f"선택됨: {selected}"
+    except Exception as exc:
+        st.session_state["path_picker_error"] = str(exc)
 
 
 # ============================================================
@@ -291,6 +385,10 @@ if "run_scan_files" not in st.session_state:
 
 with st.sidebar:
     st.markdown("## ⚙️ 분석 설정")
+    if st.session_state.get("path_picker_error"):
+        st.error(st.session_state.pop("path_picker_error"))
+    if st.session_state.get("path_picker_notice"):
+        st.success(st.session_state.pop("path_picker_notice"))
 
     # ── Data source ─────────────────────────────────────────
     st.markdown("### 📂 데이터 소스")
@@ -304,11 +402,30 @@ with st.sidebar:
     local_folder = github_repo = github_folder = github_token = ""
 
     if data_src == "로컬 폴더":
-        local_folder = st.text_input(
-            "폴더 경로",
-            value="./data",
-            placeholder="C:/data/field_images",
-        )
+        _lf1, _lf2 = st.columns([4, 1])
+        with _lf1:
+            local_folder = st.text_input(
+                "폴더 경로",
+                value="./data",
+                placeholder="C:/data/field_images",
+                key="local_folder_path",
+            )
+        with _lf2:
+            st.write("")
+            st.button(
+                "🪟 선택",
+                use_container_width=True,
+                key="browse_local_folder",
+                on_click=_browse_directory_into_state,
+                args=("local_folder_path", "초분광 데이터 폴더 선택"),
+                kwargs={"set_values": {"run_scan_files": []}},
+                disabled=not _native_dialogs_available(),
+                help=(
+                    "Windows 탐색기에서 데이터 폴더를 선택합니다."
+                    if _native_dialogs_available()
+                    else "원격/비-Windows 서버에서는 경로를 직접 입력하세요."
+                ),
+            )
     else:
         github_repo   = st.text_input("저장소 (owner/repo)",    placeholder="username/repo")
         github_folder = st.text_input("서브폴더",               value="", placeholder="data/2024")
@@ -333,14 +450,10 @@ with st.sidebar:
             if st.button("📂 폴더 스캔", use_container_width=True, key="run_scan_btn"):
                 _sp = Path(local_folder)
                 if _sp.is_dir():
-                    _exts = {".hdr", ".tif", ".tiff", ".h5", ".hdf5", ".mat"}
-                    _sf = sorted([f for f in _sp.rglob("*")
-                                  if f.suffix.lower() in _exts])
-                    _hdr_stems = {f.stem for f in _sf if f.suffix.lower() == ".hdr"}
-                    _sf = [f for f in _sf
-                           if not (f.suffix.lower() in {".raw", ".bil", ".bip", ".bsq"}
-                                   and f.stem in _hdr_stems)]
-                    st.session_state["run_scan_files"] = [str(f) for f in sorted(set(_sf))]
+                    _scan_local_hsi_files.clear()
+                    st.session_state["run_scan_files"] = list(
+                        _scan_local_hsi_files(local_folder)
+                    )
                     if not st.session_state["run_scan_files"]:
                         st.warning("지원 형식 파일을 찾지 못했습니다.")
                 else:
@@ -479,9 +592,107 @@ with st.sidebar:
 
     st.markdown("---")
 
+    # ── Reflectance / normalization ─────────────────────────
+    st.markdown("### 📐 반사율 처리")
+    _NORM_MODES = {
+        "global":   "전역 배율 (스펙트럼 형태 보존)",
+        "per_band": "밴드별 스트레치 (대비 강조)",
+        "none":     "정규화 안 함 (DN/보정 반사도 유지)",
+    }
+    _active_calibration_path = st.session_state.get("active_calibration_path", "")
+    if _active_calibration_path:
+        st.success(
+            "자동 반사율 보정 사용 중\n\n"
+            f"`{Path(_active_calibration_path).name}`"
+        )
+    else:
+        st.caption(
+            "활성 보정이 없어도 분석 시작 시 원본 폴더와 "
+            "`output/calibration`에서 같은 영상 이름의 보정파일을 찾아 "
+            "밴드 호환성을 확인한 뒤 자동 적용합니다."
+        )
+
+    normalize_mode = "none" if _active_calibration_path else "global"
+    _manual_calibration_path = ""
+    with st.expander("⚙️ 고급: 기존 보정파일·정규화 직접 설정", expanded=False):
+        normalize_mode = st.selectbox(
+            "정규화 방식",
+            list(_NORM_MODES.keys()),
+            format_func=lambda k: _NORM_MODES[k],
+            index=(2 if _active_calibration_path else 0),
+            help=(
+                "밴드별 스트레치는 스펙트럼 형태를 바꾸므로 화면 대비 확인에만 "
+                "사용하세요. 반사율 보정이 있으면 정규화 안 함이 자동 적용됩니다."
+            ),
+            key="advanced_normalize_mode",
+        )
+        _manual_calibration_path = st.text_input(
+            "기존 보정 .npz 또는 White/Dark 프로파일 폴더",
+            value="",
+            placeholder="./calibration_profiles",
+            help=(
+                "일반 사용자는 입력할 필요가 없습니다. 저장해 둔 보정 결과를 "
+                "직접 재사용할 때만 지정하세요."
+            ),
+            key="advanced_calibration_path",
+        )
+        if normalize_mode == "per_band":
+            st.warning("밴드별 스트레치는 논문용 스펙트럼 형태를 왜곡합니다.")
+
+    analysis_calibration_path = (
+        _manual_calibration_path.strip() or _active_calibration_path
+    )
+    if _active_calibration_path and not _manual_calibration_path.strip():
+        st.success(
+            "✅ 패널 보정 탭에서 만든 보정파일을 자동 사용합니다: "
+            f"{Path(_active_calibration_path).name}"
+        )
+    if analysis_calibration_path:
+        if normalize_mode != "none":
+            normalize_mode = "none"
+            st.info(
+                "반사율 보정이 연결되어 추가 정규화를 자동으로 끕니다."
+            )
+
+    st.markdown("---")
+
+    # ── Large-file handling ──────────────────────────────────
+    st.markdown("### ⚡ 대용량 파일")
+    spatial_downsample = st.select_slider(
+        "공간 다운샘플링 (1 = 원본 해상도)",
+        options=[1, 2, 4, 8],
+        value=1,
+        help=(
+            "N이면 N×N 픽셀 블록당 1개 픽셀만 읽어 메모리를 1/N²로 줄입니다. "
+            "수 GB 이상 파일은 4 권장. 스펙트럼 형태는 유지되며 "
+            "분류 지도 해상도만 낮아집니다."
+        ),
+    )
+
+    st.markdown("---")
+
     # ── Output / misc ────────────────────────────────────────
     st.markdown("### 📁 출력")
-    output_dir = st.text_input("출력 폴더", value="./output")
+    _of1, _of2 = st.columns([4, 1])
+    with _of1:
+        output_dir = st.text_input(
+            "출력 폴더", value="./output", key="output_dir_path"
+        )
+    with _of2:
+        st.write("")
+        st.button(
+            "🪟 선택",
+            use_container_width=True,
+            key="browse_output_folder",
+            on_click=_browse_directory_into_state,
+            args=("output_dir_path", "분석 결과 저장 폴더 선택"),
+            disabled=not _native_dialogs_available(),
+            help=(
+                "Windows 탐색기에서 결과 저장 폴더를 선택합니다."
+                if _native_dialogs_available()
+                else "원격/비-Windows 서버에서는 경로를 직접 입력하세요."
+            ),
+        )
     file_limit = st.number_input(
         "파일 수 제한 (0 = 전체)", min_value=0, value=0, step=1,
         help="테스트 시 1~2로 제한하면 빠르게 확인할 수 있습니다.",
@@ -492,6 +703,32 @@ with st.sidebar:
     run_btn = st.button("🚀  분석 시작", type="primary", use_container_width=True)
 
 
+# Runtime estimate for the currently configured local job.  GitHub jobs do not
+# expose reliable payload sizes until downloaded, so they are estimated only
+# after one completed run.
+st.session_state.setdefault("run_timing_history", [])
+st.session_state.setdefault("run_last_timing", None)
+_planned_run_files: list[str] = []
+if data_src == "로컬 폴더":
+    if run_mode == "🔍 단일 파일 선택" and _run_single_file:
+        _planned_run_files = [str(_run_single_file)]
+    elif run_mode == "📦 전체 배치 처리" and local_folder:
+        _planned_run_files = list(_scan_local_hsi_files(local_folder))
+        if file_limit:
+            _planned_run_files = _planned_run_files[: int(file_limit)]
+
+_run_work_units = 0.0
+_run_source_bytes = 0
+_run_estimated_seconds: float | None = None
+if _planned_run_files:
+    _run_work_units, _run_source_bytes = _file_work_units(
+        _planned_run_files, int(spatial_downsample)
+    )
+    _run_estimated_seconds = _estimate_seconds(
+        _run_work_units, method, st.session_state["run_timing_history"]
+    )
+
+
 # ============================================================
 # Main area
 # ============================================================
@@ -499,7 +736,9 @@ with st.sidebar:
 st.markdown("# 🌿 초분광 작물 분석 파이프라인")
 st.caption("Hyperspectral Field Crop Analysis · 자동 스펙트럼 추출 시스템")
 
-tab_run, tab_label = st.tabs(["🚀 분석 실행", "🏷️ 픽셀 라벨링"])
+tab_run, tab_roi, tab_panel, tab_label = st.tabs(
+    ["🚀 분석 실행", "📈 ROI 스펙트럼", "🎯 패널 보정", "🏷️ 픽셀 라벨링"]
+)
 
 # ============================================================
 # Tab 1 – Run pipeline
@@ -526,6 +765,30 @@ with tab_run:
     with col_right:
         st.success(METHODS[method]["help"])
 
+    if _run_estimated_seconds is not None:
+        _source_gib = _run_source_bytes / (1024**3)
+        st.info(
+            f"⏱ **예상 분석시간: {_format_estimate(_run_estimated_seconds)}**  ·  "
+            f"{len(_planned_run_files)}개 파일  ·  원본 {_source_gib:.2f} GB  ·  "
+            f"다운샘플 ×{spatial_downsample}"
+        )
+        st.caption(
+            "예상시간은 파일 크기·분석 방법·다운샘플링과 이 세션의 이전 실행 기록을 "
+            "사용합니다. 디스크 속도와 메모리 상태에 따라 달라질 수 있습니다."
+        )
+    elif data_src == "GitHub 저장소":
+        st.caption("⏱ GitHub 파일은 다운로드가 끝난 첫 실행부터 예상시간을 보정할 수 있습니다.")
+    else:
+        st.caption("⏱ 폴더를 스캔하고 처리할 파일을 선택하면 예상시간이 표시됩니다.")
+
+    _last_run_timing = st.session_state.get("run_last_timing")
+    if _last_run_timing:
+        st.caption(
+            f"최근 실제 소요시간: **{_format_duration(_last_run_timing['elapsed_seconds'])}**"
+            f" · {_last_run_timing.get('file_count', 0)}개 파일"
+            f" · {_last_run_timing.get('method', '').upper()}"
+        )
+
     st.markdown("---")
 
     # ── Run ────────────────────────────────────────────────────
@@ -539,6 +802,8 @@ with tab_run:
             errors.append("GitHub 저장소를 입력해 주세요.")
         if needs_labels and not labels_csv:
             errors.append(f"{method} 방법은 라벨 CSV가 필요합니다.")
+        if analysis_calibration_path and not Path(analysis_calibration_path).exists():
+            errors.append("반사도 보정 .npz 또는 프로파일 폴더를 찾을 수 없습니다.")
         if run_mode == "🔍 단일 파일 선택" and not _run_single_file:
             errors.append("단일 파일 모드: 폴더를 스캔하고 파일을 선택해 주세요.")
 
@@ -563,11 +828,15 @@ with tab_run:
                 "cache_dir": "./cache",
             },
             "preprocessing": {
-                "normalize":          True,
+                "calibration_file": analysis_calibration_path or None,
+                "auto_discover_calibration": True,
+                "calibration_search_roots": [output_dir],
+                "normalize":          normalize_mode != "none",
+                "normalize_mode":     normalize_mode,
                 "remove_bad_bands":   True,
                 "bad_band_ranges":    [[1340, 1460], [1790, 1960]],
                 "smooth_spectra":     False,
-                "spatial_downsample": 1,
+                "spatial_downsample": int(spatial_downsample),
             },
             "classification": {
                 "method": method,
@@ -655,9 +924,21 @@ with tab_run:
         pipeline_ok  = False
         _elapsed_sec = 0.0
         _t_wall      = _time.time()   # wall-clock start for file mtime filtering
+        if _run_estimated_seconds is not None:
+            st.info(
+                f"⏳ 분석을 시작합니다. 현재 예상: "
+                f"**{_format_estimate(_run_estimated_seconds)}**"
+            )
         try:
             with st.spinner("⏳ 분석 중...  (데이터 크기에 따라 수 분이 걸릴 수 있습니다)"):
-                from src.pipeline import Pipeline
+                import src.radiometry as _run_radiometry
+                import src.preprocessor as _run_preprocessor
+                import src.pipeline as _run_pipeline
+
+                importlib.reload(_run_radiometry)
+                importlib.reload(_run_preprocessor)
+                _run_pipeline = importlib.reload(_run_pipeline)
+                Pipeline = _run_pipeline.Pipeline
                 _t_start = _time.perf_counter()
                 pipeline = Pipeline(cfg)
                 pipeline.run(
@@ -677,9 +958,21 @@ with tab_run:
 
         # Results
         if pipeline_ok:
-            _em, _es = divmod(int(_elapsed_sec), 60)
-            _elapsed_str = f"{_em}분 {_es:02d}초" if _em else f"{_es}초"
-            st.success(f"✅ 분석 완료!  ⏱ 총 소요시간: **{_elapsed_str}**")
+            _elapsed_str = _format_duration(_elapsed_sec)
+            st.success(f"✅ 분석 완료!  ⏱ 실제 총 소요시간: **{_elapsed_str}**")
+            _timing_record = {
+                "method": method,
+                "work_units": _run_work_units,
+                "elapsed_seconds": _elapsed_sec,
+                "file_count": len(_planned_run_files),
+                "estimated_seconds": _run_estimated_seconds,
+            }
+            st.session_state["run_last_timing"] = _timing_record
+            if _run_work_units > 0:
+                st.session_state["run_timing_history"].append(_timing_record)
+                st.session_state["run_timing_history"] = st.session_state[
+                    "run_timing_history"
+                ][-30:]
 
             out_p = Path(output_dir)
 
@@ -730,7 +1023,2447 @@ with tab_run:
 
 
 # ============================================================
-# Tab 2 – Pixel labeling tool
+# Tab 2 – ROI spectrum viewer
+# ============================================================
+
+with tab_roi:
+    from src import roi_utils
+
+    st.markdown("### 📈 ROI 스펙트럼 추출")
+    st.caption(
+        "이미지에서 박스·올가미·클릭 Polygon으로 영역을 지정하면 그 영역 픽셀들의 "
+        "평균·중간값 스펙트럼을 그래프로 보고 CSV로 저장할 수 있습니다."
+    )
+
+    _roi_defaults: dict = {
+        "roi2_data":   None,   # ndarray (H, W, B)
+        "roi2_wl":     None,
+        "roi2_rgb":    None,
+        "roi2_meta":   None,
+        "roi2_file":   "",
+        "roi2_region": None,
+        "roi2_units":  "",
+        "roi2_cal":      None,   # {"a", "b", "method", "panels", "reflectances"}
+        "roi2_ref_path": "",
+        "roi2_refl_txt": "0.99, 0.50, 0.25",
+        "roi2_h5_path":  "",
+        "roi2_cal_open": False,
+        "roi2_cal_file": "",
+        "roi2_cal_error": "",
+        "roi2_cal_search": {},
+        "roi2_show_reflectance_rgb": False,
+        "roi2_zoom_region": None,
+        "roi2_zoom_revision": 0,
+    }
+    for k, v in _roi_defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+    # ── Step 1: Load ──────────────────────────────────────────
+    st.markdown("#### 1️⃣ 파일 로드")
+
+    _roi_candidates: list[str] = []
+    if data_src == "로컬 폴더" and local_folder:
+        _roi_candidates = list(_scan_local_hsi_files(local_folder))
+    if _run_single_file:
+        _roi_candidates.insert(0, str(_run_single_file))
+    if st.session_state.get("roi2_file") and Path(st.session_state["roi2_file"]).is_file():
+        _roi_candidates.insert(0, st.session_state["roi2_file"])
+    _roi_candidates = list(dict.fromkeys(_roi_candidates))
+    _manual_choice = "__manual_path__"
+    _roi_options = _roi_candidates + [_manual_choice]
+    _preferred_roi_file = (
+        str(_run_single_file)
+        if _run_single_file in _roi_candidates
+        else st.session_state.get("roi2_file", "")
+    )
+    _roi_default_index = (
+        _roi_options.index(_preferred_roi_file)
+        if _preferred_roi_file in _roi_options else 0
+    )
+
+    rc1, rc2, rc3, rc4 = st.columns([4, 1.4, 1, 1])
+    with rc1:
+        _roi_file_choice = st.selectbox(
+            "초분광 파일 선택",
+            options=_roi_options,
+            index=_roi_default_index,
+            format_func=lambda value: (
+                "직접 경로 입력…" if value == _manual_choice else Path(value).name
+            ),
+            label_visibility="collapsed",
+            key="roi2_file_choice",
+        )
+        if _roi_file_choice == _manual_choice:
+            roi_file_input = st.text_input(
+                "직접 파일 경로",
+                value=st.session_state.get("roi2_manual_path", ""),
+                placeholder="Z:/data/image.hdr",
+                key="roi2_manual_path",
+            )
+        else:
+            roi_file_input = _roi_file_choice
+    with rc2:
+        roi_ds = st.selectbox(
+            "다운샘플링",
+            [1, 2, 4, 8],
+            index=0,
+            format_func=lambda v: f"다운샘플 ×{v}",
+            label_visibility="collapsed",
+            key="roi2_ds",
+            help="수 GB 이상 파일은 4 이상을 권장합니다. 스펙트럼 형태는 유지됩니다.",
+        )
+    with rc3:
+        roi_load_btn = st.button("📂 로드", use_container_width=True, key="roi2_load")
+    with rc4:
+        st.button(
+            "🪟 선택",
+            use_container_width=True,
+            key="roi2_native_file",
+            on_click=_browse_file_into_state,
+            args=("roi2_manual_path", "초분광 파일 선택"),
+            kwargs={"set_values": {"roi2_file_choice": _manual_choice}},
+            disabled=not _native_dialogs_available(),
+            help="대용량 파일을 업로드하지 않고 Windows 경로만 선택합니다.",
+        )
+
+    if roi_file_input:
+        st.caption(f"선택 파일: `{roi_file_input}`")
+    if data_src == "로컬 폴더" and local_folder:
+        if st.button("🔄 현재 폴더 파일 목록 새로고침", key="roi2_refresh_files"):
+            _scan_local_hsi_files.clear()
+            st.session_state["run_scan_files"] = list(
+                _scan_local_hsi_files(local_folder)
+            )
+            st.rerun()
+    elif not _roi_candidates:
+        st.warning(
+            "ROI 화면의 대용량 파일은 웹 업로드하지 않습니다. 왼쪽 데이터 소스를 "
+            "로컬 폴더로 바꾸거나 ‘직접 경로 입력’을 사용하세요."
+        )
+
+    if st.session_state.get("active_calibration_path"):
+        st.caption("✅ 패널 보정 탭에서 만든 반사율 보정을 자동 적용합니다.")
+    else:
+        st.caption(
+            "ℹ️ 저장된 보정파일은 아래 `반사율 변환` 영역에서 불러올 수 있습니다. "
+            "파일 로드 후 표시되는 보정 상태 배너를 확인하세요."
+        )
+
+    if roi_load_btn and roi_file_input:
+        try:
+            with st.spinner("초분광 파일 로딩 중... (대용량 파일은 수 분 걸릴 수 있습니다)"):
+                from src.data_loader import HyperspectralLoader
+
+                _rl = HyperspectralLoader({"spatial_downsample": int(roi_ds)})
+                _rdata, _rmeta = _rl.load_local(roi_file_input)
+
+                st.session_state["roi2_data"]   = _rdata
+                st.session_state["roi2_wl"]     = _rmeta.get("wavelengths")
+                st.session_state["roi2_meta"]   = _rmeta
+                st.session_state["roi2_rgb"]    = roi_utils.display_rgb(
+                    _rdata, _rmeta.get("wavelengths")
+                )
+                st.session_state["roi2_file"]   = roi_file_input
+                st.session_state["roi2_region"] = None
+                st.session_state["roi2_polygon_points"] = []
+                st.session_state["roi2_polygon_last_click"] = None
+                st.session_state["roi2_units"]  = "raw DN"
+                st.session_state["roi2_cal"] = None
+                st.session_state["roi2_cal_error"] = ""
+                st.session_state["roi2_cal_search"] = {}
+                st.session_state["roi2_show_reflectance_rgb"] = False
+                st.session_state["roi2_zoom_region"] = None
+                st.session_state["roi2_zoom_revision"] = (
+                    int(st.session_state.get("roi2_zoom_revision", 0)) + 1
+                )
+
+                _active_roi_cal = st.session_state.get("active_calibration_path", "")
+                from src import radiometry as _roi_rad
+
+                _calibration_candidates: list[tuple[str, str]] = []
+                if _active_roi_cal:
+                    _calibration_candidates.append(
+                        (str(_active_roi_cal), "패널 보정 탭에서 현재 활성화됨")
+                    )
+                for _nearby_cal in _roi_rad.discover_calibration_candidates(
+                    roi_file_input,
+                    search_roots=[output_dir or "./output"],
+                ):
+                    _nearby_path = str(_nearby_cal)
+                    if all(
+                        Path(_candidate[0]).resolve() != Path(_nearby_path).resolve()
+                        for _candidate in _calibration_candidates
+                    ):
+                        _calibration_candidates.append(
+                            (_nearby_path, "이미지 로드 시 자동 탐지")
+                        )
+
+                _rejected_calibrations: list[dict] = []
+                _selected_calibration = None
+                for _candidate_path, _candidate_origin in _calibration_candidates:
+                    try:
+                        _resolved_roi_cal = _roi_rad.resolve_calibration(
+                            _candidate_path,
+                            target_source=roi_file_input,
+                            wavelengths=_rmeta.get("wavelengths"),
+                        )
+                        _candidate_a = np.asarray(_resolved_roi_cal["a"])
+                        _candidate_b = np.asarray(_resolved_roi_cal["b"])
+                        if (
+                            _candidate_a.shape != (_rdata.shape[2],)
+                            or _candidate_b.shape != (_rdata.shape[2],)
+                        ):
+                            raise ValueError(
+                                f"보정계수 {_candidate_a.shape}와 영상 밴드 "
+                                f"{_rdata.shape[2]}가 일치하지 않습니다."
+                            )
+                        if not (np.isfinite(_candidate_a) & np.isfinite(_candidate_b)).any():
+                            raise ValueError("유효한 보정 밴드가 하나도 없습니다.")
+
+                        _resolved_meta = dict(_resolved_roi_cal.get("meta") or {})
+                        _resolved_meta["selection_source"] = _candidate_origin
+                        st.session_state["roi2_cal"] = {
+                            "a": _candidate_a,
+                            "b": _candidate_b,
+                            "method": _resolved_meta.get(
+                                "method", "자동 패널 보정"
+                            ),
+                            "panels": [],
+                            "reflectances": [],
+                            "selected_profile": _resolved_roi_cal.get(
+                                "selected_profile", _candidate_path
+                            ),
+                            "meta": _resolved_meta,
+                        }
+                        st.session_state["roi2_units"] = "reflectance"
+                        st.session_state["roi2_show_reflectance_rgb"] = True
+                        st.session_state["roi2_cal_file"] = _candidate_path
+                        _selected_calibration = {
+                            "path": _candidate_path,
+                            "profile": st.session_state["roi2_cal"]["selected_profile"],
+                            "origin": _candidate_origin,
+                        }
+                        break
+                    except Exception as _candidate_error:
+                        _rejected_calibrations.append(
+                            {
+                                "path": _candidate_path,
+                                "error": str(_candidate_error),
+                            }
+                        )
+
+                if _selected_calibration is not None:
+                    st.session_state["roi2_cal_error"] = ""
+                    st.session_state["roi2_cal_search"] = {
+                        "status": "applied",
+                        "selected": _selected_calibration,
+                        "candidate_count": len(_calibration_candidates),
+                        "rejected": _rejected_calibrations,
+                    }
+                elif _calibration_candidates:
+                    _first_rejection = _rejected_calibrations[0]
+                    st.session_state["roi2_cal_error"] = (
+                        "보정파일을 찾았지만 현재 영상과 호환되지 않습니다: "
+                        f"{Path(_first_rejection['path']).name} · "
+                        f"{_first_rejection['error']}"
+                    )
+                    st.session_state["roi2_cal_search"] = {
+                        "status": "incompatible",
+                        "candidate_count": len(_calibration_candidates),
+                        "rejected": _rejected_calibrations,
+                    }
+                else:
+                    st.session_state["roi2_cal_search"] = {
+                        "status": "not_found",
+                        "candidate_count": 0,
+                        "rejected": [],
+                    }
+            st.success(
+                f"✅ 로드 완료  |  {_rdata.shape[0]} × {_rdata.shape[1]} px  "
+                f"|  {_rdata.shape[2]} 밴드  |  다운샘플 ×{roi_ds}"
+            )
+        except Exception:
+            st.error("❌ 파일 로드 실패")
+            st.code(traceback.format_exc(), language="python")
+
+    _rdata = st.session_state.get("roi2_data")
+    _rrgb  = st.session_state.get("roi2_rgb")
+    _rwl   = st.session_state.get("roi2_wl")
+
+    if _rdata is None:
+        st.info("📂 위 목록에서 파일을 선택하고 [로드]를 누르세요.")
+    else:
+        _rmeta = st.session_state.get("roi2_meta") or {}
+        _H, _W, _B = _rdata.shape
+
+        _full = _rmeta.get("full_shape")
+        _ds   = _rmeta.get("downsample_applied", 1)
+        _info = f"`{_rmeta.get('filename', '')}`  |  {_H} × {_W} px  |  {_B} 밴드"
+        if _full and _ds > 1:
+            _info += f"  |  원본 {_full[0]} × {_full[1]} px (다운샘플 ×{_ds})"
+        if _rwl:
+            _info += f"  |  {_rwl[0]:.1f}–{_rwl[-1]:.1f} nm"
+        st.success(_info)
+
+        _cal_search = st.session_state.get("roi2_cal_search") or {}
+        if _cal_search.get("status") == "applied":
+            _auto_selected = _cal_search.get("selected") or {}
+            st.info(
+                "🔎 이미지 로드 시 보정파일 확인 완료 · "
+                f"{_auto_selected.get('origin', '자동 선택')} · "
+                f"`{Path(str(_auto_selected.get('profile', ''))).name}`"
+            )
+        elif _cal_search.get("status") == "not_found":
+            st.caption(
+                "🔎 이미지 폴더와 출력 폴더에서 `calibration.npz` 및 "
+                "현재 영상명 기반 보정파일을 확인했지만 발견되지 않았습니다."
+            )
+        elif _cal_search.get("status") == "incompatible":
+            st.error(
+                "🔎 보정파일 후보를 찾았지만 밴드 수 또는 파장축이 현재 영상과 "
+                "일치하지 않아 자동 적용하지 않았습니다."
+            )
+
+        # ── Radiometric calibration (optional) ────────────────
+        # Stays open once the user engages with it, so the detected panels and
+        # any error stay visible across the rerun a button press triggers.
+        with st.expander(
+            "🎯 반사율 변환 — 보정 패널 reference 스캔 사용 (선택)",
+            expanded=bool(st.session_state.get("roi2_cal_open")),
+        ):
+            st.caption(
+                "raw DN은 반사율이 아닙니다. `DN = 반사율 × 조명 × 센서감도 + dark` 이므로 "
+                "조명과 센서 감도 곡선이 스펙트럼 형태를 왜곡합니다. 패널이 찍힌 reference "
+                "스캔을 지정하면 empirical line으로 이를 제거해 실제 반사율로 변환합니다."
+            )
+
+            _cal1, _cal2 = st.columns([3, 2])
+            with _cal1:
+                _ref_path = st.text_input(
+                    "Reference 스캔 경로 (패널이 찍힌 파일)",
+                    value=st.session_state.get("roi2_ref_path", ""),
+                    placeholder="Z:/.../reference.vnir.hdr",
+                    key="roi2_ref_path_input",
+                )
+            with _cal2:
+                _refl_txt = st.text_input(
+                    "패널 반사율 (밝은 것부터, 쉼표 구분)",
+                    value=st.session_state.get("roi2_refl_txt", "0.99, 0.50, 0.25"),
+                    key="roi2_refl_txt_input",
+                )
+
+            _h5_path = st.text_input(
+                "HySpex .h5 경로 (선택 — 패널 탐지 정확도 향상)",
+                value=st.session_state.get("roi2_h5_path", ""),
+                placeholder="Z:/.../scene.hyspex.h5",
+                key="roi2_h5_path_input",
+                help="센서 QE 곡선을 읽어 패널의 분광 평탄도를 더 정확히 판정합니다.",
+            )
+
+            st.caption(
+                "⚠️ reference 스캔은 대상 장면과 **같은 조명 조건**(같은 시각·태양각)에서 "
+                "촬영된 것이어야 합니다. 시간대가 다르면 보정에 오차가 생기며 "
+                "프로그램이 이를 감지할 수 없습니다."
+            )
+
+            # Reuse a calibration built in the 패널 보정 tab
+            _cf1, _cf2 = st.columns([4, 1])
+            with _cf1:
+                _cal_file = st.text_input(
+                    "보정 .npz 또는 White/Dark 프로파일 폴더",
+                    value=st.session_state.get("roi2_cal_file", ""),
+                    placeholder="./calibration_profiles",
+                    key="roi2_cal_file_input",
+                )
+            with _cf2:
+                st.write("")
+                if st.button("📥 불러오기", use_container_width=True,
+                             key="roi2_cal_load"):
+                    st.session_state["roi2_cal_open"] = True
+                    try:
+                        from src import radiometry as _radm2
+                        _radm2 = importlib.reload(_radm2)
+
+                        _cd = _radm2.resolve_calibration(
+                            _cal_file,
+                            target_source=st.session_state.get("roi2_file"),
+                            wavelengths=_rwl,
+                        )
+                        if len(_cd["a"]) != _rdata.shape[2]:
+                            raise ValueError(
+                                f"캘리브레이션 밴드 수({len(_cd['a'])})가 "
+                                f"현재 큐브({_rdata.shape[2]})와 다릅니다."
+                            )
+                        st.session_state["roi2_cal"] = {
+                            "a": _cd["a"], "b": _cd["b"],
+                            "method": _cd["meta"].get("method", "저장된 캘리브레이션"),
+                            "panels": [], "reflectances": [],
+                            "selected_profile": _cd.get("selected_profile", ""),
+                            "meta": _cd.get("meta", {}),
+                        }
+                        st.session_state["roi2_units"] = "reflectance"
+                        st.session_state["roi2_cal_file"] = _cal_file
+                        st.session_state["roi2_cal_error"] = ""
+                        st.session_state["roi2_cal_search"] = {
+                            "status": "applied",
+                            "selected": {
+                                "path": _cal_file,
+                                "profile": _cd.get("selected_profile", _cal_file),
+                                "origin": "사용자가 직접 불러옴",
+                            },
+                            "candidate_count": 1,
+                            "rejected": [],
+                        }
+                        st.session_state["roi2_show_reflectance_rgb"] = True
+                        st.success("✅ 캘리브레이션 적용됨")
+                    except Exception as _cal_load_error:
+                        st.session_state["roi2_cal_error"] = str(_cal_load_error)
+                        st.error("❌ 캘리브레이션 불러오기 실패")
+                        st.code(traceback.format_exc(), language="python")
+
+            _cb1, _cb2 = st.columns(2)
+            with _cb1:
+                _cal_btn = st.button(
+                    "🎯 패널 탐지 후 반사율 변환 적용",
+                    type="primary", use_container_width=True, key="roi2_cal_btn",
+                )
+            with _cb2:
+                if st.button("↩️ 원본 DN으로 되돌리기",
+                             use_container_width=True, key="roi2_cal_reset"):
+                    st.session_state["roi2_cal"] = None
+                    st.session_state["roi2_units"] = "raw DN"
+                    st.session_state["roi2_cal_error"] = ""
+                    st.session_state["roi2_cal_search"] = {
+                        "status": "manual_reset",
+                        "candidate_count": 0,
+                        "rejected": [],
+                    }
+                    st.session_state["roi2_show_reflectance_rgb"] = False
+                    st.rerun()
+
+            if _cal_btn:
+                st.session_state["roi2_cal_open"] = True
+                try:
+                    with st.spinner("Reference 스캔 로딩 및 패널 탐지 중..."):
+                        from src import radiometry as _radm
+                        from src.data_loader import HyperspectralLoader as _HL
+
+                        _prs = [float(v) for v in _refl_txt.replace(",", " ").split()]
+                        if len(_prs) < 1:
+                            raise ValueError("패널 반사율을 최소 1개 입력하세요.")
+                        if any(not (0 < v <= 1.5) for v in _prs):
+                            raise ValueError(
+                                "패널 반사율은 0~1 사이 값이어야 합니다 (예: 0.99)."
+                            )
+
+                        _refd, _refm = _HL({"spatial_downsample": 1}).load_local(_ref_path)
+                        if _refd.shape[2] != _rdata.shape[2]:
+                            raise ValueError(
+                                f"밴드 수 불일치: reference {_refd.shape[2]} vs "
+                                f"대상 {_rdata.shape[2]}"
+                            )
+
+                        _qe = None
+                        if _h5_path.strip():
+                            _qe = _radm.load_hyspex_qe(_h5_path.strip())
+                            if len(_qe) != _rdata.shape[2]:
+                                st.warning(
+                                    f"QE 밴드 수({len(_qe)})가 큐브({_rdata.shape[2]})와 "
+                                    f"달라 무시합니다."
+                                )
+                                _qe = None
+
+                        _panels = _radm.detect_panels(
+                            _refd, n_panels=len(_prs), qe=_qe
+                        )
+                        if len(_panels) < len(_prs):
+                            raise ValueError(
+                                f"패널을 {len(_panels)}개만 찾았습니다 "
+                                f"(반사율 {len(_prs)}개 입력). reference 파일을 "
+                                f"확인하거나 반사율 개수를 맞춰주세요."
+                            )
+
+                        _dns = [p["spectrum"] for p in _panels]
+                        if len(_dns) >= 2:
+                            _a, _b = _radm.empirical_line_coeffs(_dns, _prs)
+                            _method = "empirical line"
+                        else:
+                            _a = np.asarray(_prs[0]) / np.where(
+                                np.abs(_dns[0]) < 1e-9, np.nan, _dns[0]
+                            )
+                            _b = np.zeros_like(_a)
+                            _method = "flat field (패널 1장 — dark 미보정)"
+
+                        st.session_state["roi2_cal"] = {
+                            "a": np.asarray(_a), "b": np.asarray(_b),
+                            "method": _method,
+                            "panels": [
+                                {k: p[k] for k in
+                                 ("box", "n_pixels", "brightness", "flatness")}
+                                for p in _panels
+                            ],
+                            "reflectances": _prs,
+                        }
+                        st.session_state["roi2_units"] = "reflectance"
+                        st.session_state["roi2_cal_error"] = ""
+                        st.session_state["roi2_cal_search"] = {
+                            "status": "applied",
+                            "selected": {
+                                "path": _ref_path,
+                                "profile": _ref_path,
+                                "origin": "현재 세션의 Reference 패널 자동 탐지",
+                            },
+                            "candidate_count": 1,
+                            "rejected": [],
+                        }
+                        st.session_state["roi2_show_reflectance_rgb"] = True
+                        st.session_state["roi2_ref_path"] = _ref_path
+                        st.session_state["roi2_refl_txt"] = _refl_txt
+                        st.session_state["roi2_h5_path"] = _h5_path
+                    st.success(f"✅ 반사율 변환 적용 ({_method})")
+                except Exception as _panel_cal_error:
+                    st.session_state["roi2_cal_error"] = str(_panel_cal_error)
+                    st.error("❌ 반사율 변환 실패")
+                    st.code(traceback.format_exc(), language="python")
+
+            _cal = st.session_state.get("roi2_cal")
+            if _cal:
+                st.markdown(f"**적용 중:** {_cal['method']}")
+                if _cal.get("selected_profile"):
+                    st.caption(f"선택된 프로파일: `{_cal['selected_profile']}`")
+                _delta = (_cal.get("meta") or {}).get("white_time_delta_seconds")
+                if _delta is not None:
+                    st.caption(f"대상 촬영시각과 White 간격: {float(_delta) / 60:.1f}분")
+                st.dataframe(
+                    pd.DataFrame([
+                        {
+                            "패널": f"#{i}",
+                            "반사율": _cal["reflectances"][i - 1],
+                            "box [r0,r1,c0,c1]": str(p["box"]),
+                            "픽셀수": f"{p['n_pixels']:,}",
+                            "밝기": round(p["brightness"], 1),
+                            "평탄도": round(p["flatness"], 3),
+                        }
+                        for i, p in enumerate(_cal["panels"], 1)
+                    ]),
+                    use_container_width=True, hide_index=True,
+                )
+                st.caption(
+                    "평탄도가 낮을수록 분광적으로 균일한 패널입니다. "
+                    "박스 위치가 실제 패널과 다르면 결과를 신뢰하지 마세요."
+                )
+
+        _cal = st.session_state.get("roi2_cal")
+        if _cal is not None:
+            _cal_meta = _cal.get("meta") or {}
+            _cal_profile = _cal.get("selected_profile") or "현재 세션의 Reference 패널 탐지"
+            _cal_profile_name = (
+                Path(_cal_profile).name
+                if _cal.get("selected_profile") else _cal_profile
+            )
+            _cal_status = (
+                "✅ **반사율 보정 적용됨** — 아래 ROI 스펙트럼과 보정 CSV는 "
+                "단위 없는 반사율(Reflectance)입니다.\n\n"
+                f"방법: `{_cal.get('method', '저장된 캘리브레이션')}` · "
+                f"프로파일: `{_cal_profile_name}`"
+            )
+            _white_delta = _cal_meta.get("white_time_delta_seconds")
+            if _white_delta is not None:
+                _cal_status += f" · 대상 영상과 White 간격: `{float(_white_delta) / 60:.1f}분`"
+            st.success(_cal_status)
+
+            _dark_source_type = _cal_meta.get("dark_source_type")
+            if _dark_source_type == "measured_file":
+                st.caption(f"Dark: 실측 파일 · `{Path(str(_cal_meta.get('dark_source', ''))).name}`")
+            elif _dark_source_type == "synthetic_constant":
+                st.warning(
+                    "⚠️ 실측 Dark가 아니라 합성 상수 Dark를 사용한 보정입니다: "
+                    f"DN {_cal_meta.get('manual_dark_dn', 100)}"
+                )
+        else:
+            _cal_error = st.session_state.get("roi2_cal_error", "")
+            if _cal_error:
+                st.error(
+                    "❌ **반사율 보정 적용 실패** — 아래 스펙트럼은 원본 DN입니다.\n\n"
+                    + str(_cal_error)
+                )
+            else:
+                st.warning(
+                    "⚠️ **반사율 보정 미적용** — 아래 스펙트럼과 CSV는 원본 DN입니다. "
+                    "논문용 반사율로 사용하려면 `패널 보정` 탭에서 만든 .npz를 적용하세요."
+                )
+
+        st.markdown("#### 2️⃣ ROI 지정 및 스펙트럼 확인")
+        _view_control_1, _view_control_2, _view_control_3 = st.columns([2, 3, 3])
+        with _view_control_1:
+            _roi_wide_layout = st.toggle(
+                "🖼️ ROI 이미지를 전체 폭으로 보기",
+                value=True,
+                key="roi2_wide_layout",
+                help="켜면 이미지가 위에 크게 나오고 스펙트럼은 아래에 표시됩니다.",
+            )
+        with _view_control_2:
+            _roi_view_height = st.slider(
+                "이미지 화면 높이",
+                min_value=420,
+                max_value=1400,
+                value=720,
+                step=40,
+                key="roi2_view_height",
+            )
+        with _view_control_3:
+            if _cal is None:
+                st.session_state["roi2_show_reflectance_rgb"] = False
+            _show_reflectance_rgb = st.toggle(
+                "🌈 보정 반사율 RGB로 보기",
+                key="roi2_show_reflectance_rgb",
+                disabled=_cal is None,
+                help=(
+                    "켜면 RGB에 해당하는 세 밴드만 반사율로 변환하여 공통 범위로 표시합니다. "
+                    "스펙트럼 계산 결과에는 영향을 주지 않습니다."
+                ),
+            )
+
+        _reflectance_rgb_max = 0.6
+        if _show_reflectance_rgb and _cal is not None:
+            _reflectance_rgb_max = st.slider(
+                "반사율 RGB 밝기 범위 (0부터 최대값)",
+                min_value=0.10,
+                max_value=1.50,
+                value=0.60,
+                step=0.05,
+                key="roi2_reflectance_rgb_max",
+                help=(
+                    "RGB 화면에만 적용되는 공통 반사율 표시 범위입니다. "
+                    "스펙트럼 값과 저장되는 CSV는 바뀌지 않습니다."
+                ),
+            )
+
+        # Line-scan field images can be tens of thousands of rows long. Showing
+        # the whole scan at once compresses every plot into a thin strip, so an
+        # elongated image opens as a manageable row/column window instead.
+        _view_r0, _view_r1, _view_c0, _view_c1 = 0, _H, 0, _W
+        if _H > max(1800, 3 * _W):
+            _default_rows = min(_H, max(1000, 2 * _W))
+            _row_range_key = f"roi2_row_range_{_H}_{_W}"
+            _view_r0, _view_r1 = st.slider(
+                "세로로 긴 영상 — 화면에 표시할 행(row) 구간",
+                min_value=0,
+                max_value=_H,
+                value=(0, _default_rows),
+                step=1,
+                key=_row_range_key,
+                help="스펙트럼 계산 좌표는 자동으로 원본 영상 좌표로 변환됩니다.",
+            )
+            if _view_r1 <= _view_r0:
+                _view_r1 = min(_H, _view_r0 + 1)
+            st.caption(
+                f"현재 원본 행 {_view_r0:,}–{_view_r1:,} 표시 중 · "
+                "슬라이더를 옮겨 다른 구간에서 ROI를 선택하세요."
+            )
+        elif _W > max(1800, 3 * _H):
+            _default_cols = min(_W, max(1000, 2 * _H))
+            _col_range_key = f"roi2_col_range_{_H}_{_W}"
+            _view_c0, _view_c1 = st.slider(
+                "가로로 긴 영상 — 화면에 표시할 열(column) 구간",
+                min_value=0,
+                max_value=_W,
+                value=(0, _default_cols),
+                step=1,
+                key=_col_range_key,
+                help="스펙트럼 계산 좌표는 자동으로 원본 영상 좌표로 변환됩니다.",
+            )
+            if _view_c1 <= _view_c0:
+                _view_c1 = min(_W, _view_c0 + 1)
+            st.caption(
+                f"현재 원본 열 {_view_c0:,}–{_view_c1:,} 표시 중 · "
+                "슬라이더를 옮겨 다른 구간에서 ROI를 선택하세요."
+            )
+
+        _base_view = (_view_r0, _view_r1, _view_c0, _view_c1)
+        _zoom_region = st.session_state.get("roi2_zoom_region")
+        _zoom_active = False
+        if _zoom_region is not None:
+            _zr0, _zr1, _zc0, _zc1 = roi_utils.box_region(
+                _zoom_region, _H, _W
+            )["roi"]
+            _zoomed_view = (
+                max(_view_r0, _zr0),
+                min(_view_r1, _zr1),
+                max(_view_c0, _zc0),
+                min(_view_c1, _zc1),
+            )
+            if (
+                _zoomed_view[1] > _zoomed_view[0]
+                and _zoomed_view[3] > _zoomed_view[2]
+                and _zoomed_view != _base_view
+            ):
+                _view_r0, _view_r1, _view_c0, _view_c1 = _zoomed_view
+                _zoom_active = True
+            else:
+                st.session_state["roi2_zoom_region"] = None
+
+        if _zoom_active:
+            _base_pixels = max(
+                1,
+                (_base_view[1] - _base_view[0])
+                * (_base_view[3] - _base_view[2]),
+            )
+            _zoom_pixels = max(
+                1,
+                (_view_r1 - _view_r0) * (_view_c1 - _view_c0),
+            )
+            _zoom_factor = np.sqrt(_base_pixels / _zoom_pixels)
+            st.info(
+                "🔍 확대 화면 유지 중 · "
+                f"row `{_view_r0}:{_view_r1}`, col `{_view_c0}:{_view_c1}` · "
+                f"약 `{_zoom_factor:.1f}×` 확대"
+            )
+
+        _raw_roi_view_rgb = _rrgb[_view_r0:_view_r1, _view_c0:_view_c1]
+        _roi_view_rgb = _raw_roi_view_rgb
+        _rgb_display_label = "원본 DN 기반 RGB · 채널별 화면 스트레치"
+        if _show_reflectance_rgb and _cal is not None:
+            try:
+                _roi_view_rgb = roi_utils.display_reflectance_rgb(
+                    _rdata[_view_r0:_view_r1, _view_c0:_view_c1, :],
+                    _rwl,
+                    _cal["a"],
+                    _cal["b"],
+                    reflectance_max=float(_reflectance_rgb_max),
+                )
+                _rgb_display_label = (
+                    "보정 반사율 RGB · 세 채널 공통 범위 "
+                    f"0–{float(_reflectance_rgb_max):.2f}"
+                )
+            except Exception as _rgb_cal_error:
+                st.warning(
+                    "보정 반사율 RGB를 만들지 못해 원본 DN RGB로 표시합니다: "
+                    f"{_rgb_cal_error}"
+                )
+        _view_H, _view_W = _roi_view_rgb.shape[:2]
+        if _roi_wide_layout:
+            roi_left = st.container()
+            roi_right = st.container()
+        else:
+            roi_left, roi_right = st.columns([3, 2])
+
+        with roi_left:
+            st.caption(f"현재 표시 영상: **{_rgb_display_label}**")
+            _mouse1, _mouse2 = st.columns([3, 1])
+            with _mouse1:
+                _roi_mouse_mode = st.radio(
+                    "마우스 조작 모드",
+                    (
+                        "⬚ Box ROI",
+                        "✏️ Lasso ROI",
+                        "🔺 Polygon 클릭 ROI",
+                        "🔍 확대",
+                    ),
+                    horizontal=True,
+                    key="roi2_mouse_mode",
+                    help=(
+                        "확대 모드에서 보고 싶은 영역을 사각형으로 드래그하면 그 좌표를 "
+                        "확대 화면으로 저장합니다. ROI 모드로 바꿔도 확대가 유지됩니다."
+                    ),
+                )
+            with _mouse2:
+                st.write("")
+                if st.button(
+                    "↩️ 전체 화면",
+                    use_container_width=True,
+                    key="roi2_zoom_reset",
+                    disabled=not _zoom_active,
+                ):
+                    st.session_state["roi2_zoom_region"] = None
+                    st.session_state["roi2_zoom_revision"] = (
+                        int(st.session_state.get("roi2_zoom_revision", 0)) + 1
+                    )
+                    st.rerun()
+            st.caption(
+                "① `🔍 확대` 선택 → ② 크게 볼 영역을 사각형으로 드래그 → "
+                "③ 확대 후 Box/Lasso/Polygon으로 바꿔 ROI 선택 · "
+                "Polygon은 잎 둘레의 꼭짓점을 차례로 클릭하고 완료 버튼을 누르세요."
+            )
+            if _roi_mouse_mode == "🔺 Polygon 클릭 ROI":
+                from PIL import Image, ImageDraw
+
+                _poly_points = list(
+                    st.session_state.get("roi2_polygon_points", [])
+                )
+                _pc1, _pc2, _pc3 = st.columns(3)
+                if _pc1.button(
+                    "↶ 마지막 점 취소",
+                    key="roi2_polygon_undo",
+                    use_container_width=True,
+                    disabled=not _poly_points,
+                ):
+                    st.session_state["roi2_polygon_points"] = _poly_points[:-1]
+                    st.rerun()
+                if _pc2.button(
+                    "🗑️ 점 모두 지우기",
+                    key="roi2_polygon_clear",
+                    use_container_width=True,
+                    disabled=not _poly_points,
+                ):
+                    st.session_state["roi2_polygon_points"] = []
+                    st.rerun()
+                if _pc3.button(
+                    "✅ Polygon 완료",
+                    key="roi2_polygon_finish",
+                    type="primary",
+                    use_container_width=True,
+                    disabled=len(_poly_points) < 3,
+                ):
+                    st.session_state["roi2_region"] = roi_utils.polygon_region(
+                        [point[0] for point in _poly_points],
+                        [point[1] for point in _poly_points],
+                        _H,
+                        _W,
+                    )
+                    st.session_state["roi2_polygon_points"] = []
+                    st.rerun()
+
+                _poly_image = Image.fromarray(_roi_view_rgb).convert("RGB")
+                _poly_draw = ImageDraw.Draw(_poly_image)
+                _line_width = max(2, min(_view_H, _view_W) // 180)
+                _point_radius = max(3, min(_view_H, _view_W) // 100)
+                _current_region = st.session_state.get("roi2_region")
+                if _current_region:
+                    if _current_region.get("type") in {"lasso", "polygon"}:
+                        _saved_points = [
+                            (float(x) - _view_c0, float(y) - _view_r0)
+                            for x, y in zip(
+                                _current_region.get("x", []),
+                                _current_region.get("y", []),
+                            )
+                        ]
+                        if len(_saved_points) >= 3:
+                            _poly_draw.line(
+                                _saved_points + [_saved_points[0]],
+                                fill="#00e5ff",
+                                width=_line_width,
+                            )
+                    else:
+                        _cr0, _cr1, _cc0, _cc1 = _current_region["roi"]
+                        _poly_draw.rectangle(
+                            (
+                                _cc0 - _view_c0,
+                                _cr0 - _view_r0,
+                                _cc1 - _view_c0,
+                                _cr1 - _view_r0,
+                            ),
+                            outline="#00e5ff",
+                            width=_line_width,
+                        )
+                _local_draft = [
+                    (float(x) - _view_c0, float(y) - _view_r0)
+                    for x, y in _poly_points
+                ]
+                if len(_local_draft) >= 2:
+                    _poly_draw.line(_local_draft, fill="#ffd54f", width=_line_width)
+                for _point_index, (_px, _py) in enumerate(_local_draft, 1):
+                    _poly_draw.ellipse(
+                        (
+                            _px - _point_radius,
+                            _py - _point_radius,
+                            _px + _point_radius,
+                            _py + _point_radius,
+                        ),
+                        fill="#ffd54f",
+                        outline="#111111",
+                    )
+                    _poly_draw.text(
+                        (_px + _point_radius, _py - _point_radius),
+                        str(_point_index),
+                        fill="#ffffff",
+                    )
+                _click = streamlit_image_coordinates(
+                    _poly_image,
+                    height=int(_roi_view_height),
+                    key=(
+                        "roi2_polygon_image_"
+                        f"{st.session_state.get('roi2_file', '')}|"
+                        f"{_view_r0}:{_view_r1}:{_view_c0}:{_view_c1}"
+                    ),
+                    cursor="crosshair",
+                )
+                if _click:
+                    _click_id = _click.get("unix_time")
+                    if _click_id != st.session_state.get("roi2_polygon_last_click"):
+                        _display_w = max(1, int(_click.get("width", _view_W)))
+                        _display_h = max(1, int(_click.get("height", _view_H)))
+                        _full_x = _view_c0 + np.clip(
+                            float(_click["x"]) * _view_W / _display_w,
+                            0,
+                            max(0, _view_W - 1),
+                        )
+                        _full_y = _view_r0 + np.clip(
+                            float(_click["y"]) * _view_H / _display_h,
+                            0,
+                            max(0, _view_H - 1),
+                        )
+                        st.session_state["roi2_polygon_points"] = (
+                            _poly_points + [(float(_full_x), float(_full_y))]
+                        )
+                        st.session_state["roi2_polygon_last_click"] = _click_id
+                        st.rerun()
+                st.caption(f"현재 꼭짓점: **{len(_poly_points)}개** · 최소 3개")
+            else:
+                _rfig = go.Figure()
+                _rfig.add_trace(go.Image(z=_roi_view_rgb))
+                _current_region = st.session_state.get("roi2_region")
+                if _current_region:
+                    if _current_region.get("type") in {"lasso", "polygon"}:
+                        _xs = [x - _view_c0 for x in _current_region.get("x", [])]
+                        _ys = [y - _view_r0 for y in _current_region.get("y", [])]
+                        if len(_xs) >= 3:
+                            _rfig.add_shape(
+                                type="path",
+                                path="M " + " L ".join(
+                                    f"{x},{y}" for x, y in zip(_xs, _ys)
+                                ) + " Z",
+                                line=dict(color="#00e5ff", width=3, dash="dash"),
+                            )
+                    else:
+                        _cr0, _cr1, _cc0, _cc1 = _current_region.get(
+                            "roi", [0, 0, 0, 0]
+                        )
+                        if (
+                            _cr1 > _view_r0 and _cr0 < _view_r1
+                            and _cc1 > _view_c0 and _cc0 < _view_c1
+                        ):
+                            _rfig.add_shape(
+                                type="rect",
+                                x0=max(_cc0, _view_c0) - _view_c0,
+                                x1=min(_cc1, _view_c1) - _view_c0,
+                                y0=max(_cr0, _view_r0) - _view_r0,
+                                y1=min(_cr1, _view_r1) - _view_r0,
+                                line=dict(color="#00e5ff", width=3, dash="dash"),
+                            )
+                _rfig.update_layout(
+                    dragmode=(
+                        "select" if _roi_mouse_mode == "🔍 확대"
+                        else "lasso" if _roi_mouse_mode == "✏️ Lasso ROI"
+                        else "select"
+                    ),
+                    margin=dict(l=0, r=0, t=0, b=0),
+                    height=int(_roi_view_height),
+                    newselection=dict(line=dict(color="#ffd54f", width=3)),
+                    uirevision=(
+                        f"{st.session_state.get('roi2_file', '')}|"
+                        f"{_view_r0}:{_view_r1}:{_view_c0}:{_view_c1}|"
+                        f"{_rgb_display_label}|"
+                        f"{st.session_state.get('roi2_zoom_revision', 0)}"
+                    ),
+                )
+                _rfig.update_xaxes(showticklabels=False)
+                _rfig.update_yaxes(showticklabels=False)
+
+                _revent = st.plotly_chart(
+                    _rfig,
+                    key=(
+                        "roi2_image_chart_"
+                        f"{int(st.session_state.get('roi2_zoom_revision', 0))}_"
+                        f"{_roi_mouse_mode}"
+                    ),
+                    on_select="rerun",
+                    selection_mode=(
+                        ("box",)
+                        if _roi_mouse_mode == "🔍 확대" else ("box", "lasso")
+                    ),
+                    use_container_width=True,
+                    config={**_ROI_PLOTLY_CONFIG, "scrollZoom": False},
+                )
+
+                if _revent is not None and hasattr(_revent, "selection"):
+                    _view_region = roi_utils.selection_to_region(
+                        _revent.selection, _view_H, _view_W
+                    )
+                    if _view_region is not None:
+                        _full_view_region = roi_utils.offset_region(
+                            _view_region, _view_r0, _view_c0, _H, _W
+                        )
+                        if _roi_mouse_mode == "🔍 확대":
+                            _new_zoom = _full_view_region["roi"]
+                            if (
+                                _new_zoom != st.session_state.get("roi2_zoom_region")
+                                and (_new_zoom[1] - _new_zoom[0]) >= 2
+                                and (_new_zoom[3] - _new_zoom[2]) >= 2
+                            ):
+                                st.session_state["roi2_zoom_region"] = _new_zoom
+                                st.session_state["roi2_zoom_revision"] = (
+                                    int(st.session_state.get("roi2_zoom_revision", 0)) + 1
+                                )
+                                st.rerun()
+                        else:
+                            st.session_state["roi2_region"] = _full_view_region
+
+        with roi_right:
+            _region = st.session_state.get("roi2_region")
+            if not _region:
+                st.info("⬅️ 왼쪽 이미지에서 영역을 드래그하세요.")
+            else:
+                _r0, _r1, _c0, _c1 = _region["roi"]
+                st.write(
+                    f"선택: `{_region.get('type', 'box')}`  |  "
+                    f"row `{_r0}:{_r1}`, col `{_c0}:{_c1}`"
+                )
+
+                try:
+                    with st.expander("좌표 직접 입력", expanded=False):
+                        with st.form("roi2_manual_form"):
+                            _nr0 = st.number_input("row 시작", 0, _H - 1, int(_r0), 1)
+                            _nr1 = st.number_input("row 끝",   1, _H,     int(_r1), 1)
+                            _nc0 = st.number_input("col 시작", 0, _W - 1, int(_c0), 1)
+                            _nc1 = st.number_input("col 끝",   1, _W,     int(_c1), 1)
+                            if st.form_submit_button("이 좌표로 적용"):
+                                st.session_state["roi2_region"] = roi_utils.box_region(
+                                    [_nr0, _nr1, _nc0, _nc1], _H, _W
+                                )
+                                st.rerun()
+
+                    _stats, _npix, _bounds, _rtype = roi_utils.roi_stats(_rdata, _region)
+
+                    # Empirical line is affine per band, so the statistics can
+                    # be converted directly — no need to touch the whole cube.
+                    _calib = st.session_state.get("roi2_cal")
+                    if _calib is not None:
+                        _stats = roi_utils.apply_calibration(
+                            _stats, _calib["a"], _calib["b"]
+                        )
+
+                    st.caption(
+                        f"사용된 픽셀 수: {_npix:,}"
+                        + (f"  ·  반사율 변환 적용 ({_calib['method']})"
+                           if _calib is not None else "")
+                    )
+
+                    _has_wl = _rwl is not None and len(_rwl) == len(_stats)
+                    _xax   = _rwl if _has_wl else list(range(len(_stats)))
+                    _xttl  = "Wavelength (nm)" if _has_wl else "Band index"
+
+                    st.markdown("##### 그래프 표시 범위")
+                    _plot_mask = np.ones(len(_stats), dtype=bool)
+                    if _has_wl:
+                        _wl_array = np.asarray(_rwl, dtype=float)
+                        _finite_wl = _wl_array[np.isfinite(_wl_array)]
+                        _wl_min = float(np.min(_finite_wl))
+                        _wl_max = float(np.max(_finite_wl))
+                        _wl_steps = np.diff(np.unique(np.sort(_finite_wl)))
+                        _wl_step = float(np.median(_wl_steps)) if len(_wl_steps) else 1.0
+                        _wl_step = max(0.1, min(10.0, _wl_step))
+                        _quick_900 = float(
+                            _finite_wl[np.argmin(np.abs(_finite_wl - 900.0))]
+                        )
+                        _wave_key = (
+                            f"roi2_wave_range_{len(_stats)}_"
+                            f"{_wl_min:.2f}_{_wl_max:.2f}"
+                        )
+                        if _wave_key not in st.session_state:
+                            st.session_state[_wave_key] = (_wl_min, _wl_max)
+
+                        _wr1, _wr2 = st.columns(2)
+                        with _wr1:
+                            if st.button(
+                                "⚡ 900 nm까지만 보기",
+                                use_container_width=True,
+                                disabled=not (_wl_min < 900.0 < _wl_max),
+                                key="roi2_wave_to_900",
+                            ):
+                                st.session_state[_wave_key] = (_wl_min, _quick_900)
+                        with _wr2:
+                            if st.button(
+                                "↔️ 전체 파장 복원",
+                                use_container_width=True,
+                                key="roi2_wave_full",
+                            ):
+                                st.session_state[_wave_key] = (_wl_min, _wl_max)
+
+                        _wave_range = st.slider(
+                            "표시할 파장 범위 (nm)",
+                            min_value=_wl_min,
+                            max_value=_wl_max,
+                            step=_wl_step,
+                            key=_wave_key,
+                            help="그래프만 확대합니다. ROI 계산과 CSV 저장은 전체 밴드를 유지합니다.",
+                        )
+                        _plot_mask = (
+                            (_wl_array >= float(_wave_range[0]))
+                            & (_wl_array <= float(_wave_range[1]))
+                        )
+
+                    _gc1, _gc2 = st.columns(2)
+                    with _gc1:
+                        _show_band = st.checkbox(
+                            "±1 표준편차 범위 표시", value=True, key="roi2_show_std"
+                        )
+                    with _gc2:
+                        _y_mode = st.selectbox(
+                            "Y축 표시 범위",
+                            ("자동", "반사율 0–1", "직접 입력"),
+                            key="roi2_y_mode",
+                            help="자동은 현재 선택한 파장 구간만 기준으로 범위를 다시 맞춥니다.",
+                        )
+
+                    _y_range = None
+                    if _y_mode == "반사율 0–1":
+                        _y_range = [0.0, 1.0]
+                    elif _y_mode == "직접 입력":
+                        _yr1, _yr2 = st.columns(2)
+                        with _yr1:
+                            _y_min_manual = st.number_input(
+                                "Y축 최소", value=0.0, format="%.4f", key="roi2_y_min"
+                            )
+                        with _yr2:
+                            _y_max_manual = st.number_input(
+                                "Y축 최대", value=1.0, format="%.4f", key="roi2_y_max"
+                            )
+                        if float(_y_max_manual) > float(_y_min_manual):
+                            _y_range = [float(_y_min_manual), float(_y_max_manual)]
+                        else:
+                            st.warning("Y축 최대값은 최소값보다 커야 합니다. 현재는 자동 범위를 사용합니다.")
+
+                    _plot_x = np.asarray(_xax)[_plot_mask]
+                    _plot_mean = _stats["mean"].to_numpy()[_plot_mask]
+                    _plot_median = _stats["median"].to_numpy()[_plot_mask]
+                    _plot_std = _stats["std"].to_numpy()[_plot_mask]
+
+                    _sfig = go.Figure()
+                    if _show_band:
+                        _upper = _plot_mean + _plot_std
+                        _lower = _plot_mean - _plot_std
+                        _sfig.add_trace(go.Scatter(
+                            x=list(_plot_x) + list(_plot_x)[::-1],
+                            y=list(_upper) + list(_lower)[::-1],
+                            fill="toself",
+                            fillcolor="rgba(31,119,180,0.15)",
+                            line=dict(color="rgba(0,0,0,0)"),
+                            hoverinfo="skip",
+                            name="±1 std",
+                        ))
+                    _sfig.add_trace(go.Scatter(
+                        x=_plot_x, y=_plot_mean, mode="lines",
+                        name="Mean", line=dict(color="#1f77b4", width=2.5),
+                    ))
+                    _sfig.add_trace(go.Scatter(
+                        x=_plot_x, y=_plot_median, mode="lines",
+                        name="Median", line=dict(color="#d62728", width=1.6, dash="dash"),
+                    ))
+                    _spectrum_title = (
+                        "ROI 반사율 스펙트럼 — 보정 적용됨"
+                        if _calib is not None
+                        else "ROI Raw DN 스펙트럼 — 보정 미적용"
+                    )
+                    _spectrum_y_title = (
+                        "Reflectance (unitless)"
+                        if _calib is not None else "Raw DN"
+                    )
+                    _sfig.update_layout(
+                        title=_spectrum_title,
+                        height=380,
+                        xaxis_title=_xttl,
+                        yaxis=dict(
+                            title=_spectrum_y_title,
+                            range=_y_range,
+                        ),
+                        margin=dict(l=50, r=10, t=30, b=45),
+                        legend=dict(orientation="h", y=1.1),
+                        hovermode="x unified",
+                    )
+                    st.plotly_chart(_sfig, use_container_width=True, key="roi2_spec_chart")
+
+                    # Vegetation index readout — meaningful because values are raw
+                    if _has_wl:
+                        _wla = np.array(_rwl)
+                        _ri  = int(np.argmin(np.abs(_wla - 670)))
+                        _ni  = int(np.argmin(np.abs(_wla - 800)))
+                        if abs(_wla[_ri] - 670) < 25 and abs(_wla[_ni] - 800) < 25:
+                            _red = float(_stats["mean"].iloc[_ri])
+                            _nir = float(_stats["mean"].iloc[_ni])
+                            _den = _nir + _red
+                            if _den > 1e-9:
+                                m1, m2 = st.columns(2)
+                                _index_suffix = (
+                                    " (반사율)" if _calib is not None else " (Raw DN 참고용)"
+                                )
+                                m1.metric(
+                                    "NDVI" + _index_suffix,
+                                    f"{(_nir - _red) / _den:.4f}",
+                                )
+                                m2.metric("NIR/Red" + _index_suffix, f"{_nir / _red:.3f}"
+                                          if _red > 1e-9 else "—")
+                                if _calib is None:
+                                    st.caption(
+                                        "⚠️ Raw DN 기반 식생지수는 센서의 밴드별 감도와 Dark 영향을 "
+                                        "포함하므로 논문용 지수로 사용하지 마세요."
+                                    )
+
+                    _prev = _stats[["mean", "median", "std"]].copy()
+                    if _has_wl:
+                        _prev.insert(0, "wavelength_nm", _rwl)
+                    else:
+                        _prev.insert(0, "band_index", np.arange(len(_prev)))
+                    st.dataframe(_prev.head(15), use_container_width=True, height=220)
+
+                    _def_out = str(
+                        Path(st.session_state["roi2_file"]).with_name(
+                            Path(st.session_state["roi2_file"]).stem
+                            + ("_roi_reflectance.csv" if _calib is not None else "_roi_raw_dn.csv")
+                        )
+                    )
+                    _save_to = st.text_input(
+                        "CSV 저장 경로", value=_def_out, key="roi2_save_path"
+                    )
+                    if st.button("💾 CSV 저장", type="primary",
+                                 use_container_width=True, key="roi2_save_btn"):
+                        _out = roi_utils.save_roi_csv(
+                            data=_rdata,
+                            wavelengths=_rwl,
+                            region=_region,
+                            source_file=st.session_state["roi2_file"],
+                            path=_save_to,
+                            value_units=st.session_state["roi2_units"],
+                            calibration=((_calib["a"], _calib["b"])
+                                         if _calib is not None else None),
+                            calibration_meta=(
+                                {
+                                    "method": _calib.get("method", ""),
+                                    "selected_profile": _calib.get("selected_profile", ""),
+                                    "selection_source": (_calib.get("meta") or {}).get(
+                                        "selection_source", ""
+                                    ),
+                                    "meta": _calib.get("meta", {}),
+                                }
+                                if _calib is not None else None
+                            ),
+                        )
+                        if _calib is not None:
+                            _raw_out = _out.with_name(
+                                _out.stem + "_raw_dn" + _out.suffix
+                            )
+                            roi_utils.save_roi_csv(
+                                data=_rdata,
+                                wavelengths=_rwl,
+                                region=_region,
+                                source_file=st.session_state["roi2_file"],
+                                path=str(_raw_out),
+                                value_units="raw DN",
+                                calibration=None,
+                                calibration_meta={
+                                    "method": _calib.get("method", ""),
+                                    "selected_profile": _calib.get("selected_profile", ""),
+                                    "selection_source": (_calib.get("meta") or {}).get(
+                                        "selection_source", ""
+                                    ),
+                                    "meta": _calib.get("meta", {}),
+                                },
+                            )
+                            st.success(
+                                f"✅ 보정후: `{_out.resolve()}`\n\n"
+                                f"✅ 보정전: `{_raw_out.resolve()}`"
+                            )
+                        else:
+                            st.success(f"✅ 저장 완료: `{_out.resolve()}`")
+
+                except Exception:
+                    st.error("❌ ROI 스펙트럼 계산 실패")
+                    st.code(traceback.format_exc(), language="python")
+
+
+# ============================================================
+# Tab 3 – Panel calibration (white / grey reference extraction)
+# ============================================================
+
+with tab_panel:
+    from src import roi_utils as _ru
+    from src import radiometry as _rad
+    _rad = importlib.reload(_rad)
+
+    st.markdown("### 🎯 보정 패널로 반사율 캘리브레이션 만들기")
+    st.caption(
+        "패널 ROI의 실제 반사도와 Dark 기준값을 등록하면 포화·노이즈를 파장별로 "
+        "검사하고, 유효한 패널들을 자동 결합해 반사율 보정계수를 만듭니다."
+    )
+
+    with st.expander("📖 패널이 여러 장일 때 왜 더 정확한가?", expanded=False):
+        st.markdown(
+            "센서가 기록하는 값은 반사율이 아니라\n\n"
+            "$$DN(\\lambda) = R(\\lambda)\\,E(\\lambda)\\,S(\\lambda) + d(\\lambda)$$\n\n"
+            "입니다. $E$는 조명, $S$는 센서 감도, $d$는 dark·경로복사 같은 **더해지는 오프셋**입니다.\n\n"
+            "**Sensor Dark** — 렌즈를 막고 같은 integration time·gain으로 측정한 값을 "
+            "모든 영상과 패널에서 먼저 뺍니다. 패널이 한 장이어도 "
+            "$R = R_{panel}(DN-D)/(DN_{panel}-D)$ 로 절대 반사율을 계산할 수 있습니다.\n\n"
+            "**Dark 파일이 없을 때** — 센서 Dark가 파장별로 거의 평평하다는 사전 확인이 "
+            "있다면 수동 상수값(기본 DN 100)을 임시로 사용할 수 있습니다. 이 경우 결과에 "
+            "합성 Dark 사용 이력이 남습니다.\n\n"
+            "**패널 2장 이상** — 밴드마다 $R=a(\\lambda)(DN-D)$를 모든 유효 패널에 "
+            "동시에 맞춥니다. 밝은 패널이 포화에 가까워지면 그 가중치를 부드럽게 "
+            "낮추고, 정상인 낮은 반사율 패널이 같은 회귀식을 이어받습니다. 패널 스펙트럼을 "
+            "딱 잘라 붙이지 않으므로 전환 경계의 불연속을 줄일 수 있습니다.\n\n"
+            "**공통 구간 검증** — 여러 패널이 모두 정상인 파장에서 각각의 보정계수가 "
+            "얼마나 일치하는지 CV로 확인합니다. 차이가 크면 패널 높이·각도·오염 또는 "
+            "조명 변화를 점검해야 합니다.\n\n"
+            "**패널 선택 요령** — 관심 대상의 반사율 범위를 감싸도록 고르세요. "
+            "식생 NIR은 40~60%까지 올라가므로 밝은 패널이 필요하고, "
+            "그림자나 흙은 5~10%라 어두운 패널이 있어야 그 구간이 외삽이 아닌 내삽이 됩니다."
+        )
+
+    _pn_defaults: dict = {
+        "pn_data": None, "pn_wl": None, "pn_rgb": None, "pn_meta": None,
+        "pn_file": "", "pn_region": None,
+        "pn_panels": [],      # [{"name","reflectance","box","type","spectrum"}]
+        "pn_source_max": None,
+        "pn_auto_rejected": [],
+        "pn_fit": None,
+        "pn_dark_mode": "수동 상수 DN",
+        "pn_dark_active_mode": "",
+        "pn_dark_path": "",
+        "pn_dark_spectrum": None,
+        "pn_dark_noise": None,
+        "pn_dark_qc": None,
+        "pn_preview_rgb": None,
+        "pn_saved_calibration": "",
+        "wd_last_profile": "",
+    }
+    for k, v in _pn_defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+    # ── Step 1: load ──────────────────────────────────────────
+    st.markdown("#### 1️⃣ 패널이 찍힌 이미지 열기")
+    _pn_candidates: list[str] = []
+    if data_src == "로컬 폴더" and local_folder:
+        _pn_candidates.extend(_scan_local_hsi_files(local_folder))
+    if st.session_state.get("pn_file"):
+        _pn_candidates.insert(0, st.session_state["pn_file"])
+    _pn_candidates = list(dict.fromkeys(_pn_candidates))
+    _pn_manual = "__manual_panel_path__"
+    _pn_options = _pn_candidates + [_pn_manual]
+    _pn_current = st.session_state.get("pn_file", "")
+    _pn_index = (
+        _pn_options.index(_pn_current)
+        if _pn_current in _pn_options
+        else (0 if _pn_candidates else len(_pn_options) - 1)
+    )
+    _p1, _p2, _p3, _p4 = st.columns([4, 1.4, 1, 1])
+    with _p1:
+        _pn_choice = st.selectbox(
+            "패널 영상 선택",
+            _pn_options,
+            index=_pn_index,
+            format_func=lambda value: (
+                "직접 경로 입력…" if value == _pn_manual else Path(value).name
+            ),
+            label_visibility="collapsed",
+            key="pn_file_choice",
+        )
+        if _pn_choice == _pn_manual:
+            _pn_path = st.text_input(
+                "패널 영상 직접 경로",
+                value=st.session_state.get("pn_file", ""),
+                placeholder="Z:/.../vnir.bil.hdr 또는 reference.hdr",
+                key="pn_path_input",
+            )
+        else:
+            _pn_path = _pn_choice
+    with _p2:
+        _pn_ds = st.selectbox(
+            "다운샘플", [1, 2, 4, 8], index=0,
+            format_func=lambda v: f"다운샘플 ×{v}",
+            label_visibility="collapsed", key="pn_ds",
+            help="패널은 보통 크므로 4로도 충분합니다. 작은 패널이면 1~2를 쓰세요.",
+        )
+    with _p3:
+        _pn_load = st.button("📂 로드", use_container_width=True, key="pn_load")
+    with _p4:
+        st.button(
+            "🪟 선택",
+            use_container_width=True,
+            key="pn_native_file",
+            on_click=_browse_file_into_state,
+            args=("pn_path_input", "보정 패널 영상 선택"),
+            kwargs={"set_values": {"pn_file_choice": _pn_manual}},
+            disabled=not _native_dialogs_available(),
+            help="Windows 탐색기에서 패널이 찍힌 파일을 선택합니다.",
+        )
+
+    if _pn_load and _pn_path:
+        try:
+            with st.spinner("이미지 로딩 중..."):
+                from src.data_loader import HyperspectralLoader as _HL2
+
+                _pd, _pm = _HL2({"spatial_downsample": int(_pn_ds)}).load_local(_pn_path)
+                st.session_state.update({
+                    "pn_data": _pd, "pn_wl": _pm.get("wavelengths"),
+                    "pn_meta": _pm, "pn_file": _pn_path,
+                    "pn_rgb": _ru.display_rgb(_pd, _pm.get("wavelengths")),
+                    "pn_source_max": float(np.nanmax(_pd)),
+                    "pn_region": None, "pn_panels": [], "pn_auto_rejected": [],
+                    "pn_fit": None, "pn_dark_spectrum": None,
+                    "pn_dark_noise": None, "pn_dark_qc": None,
+                    "pn_preview_rgb": None, "pn_saved_calibration": "",
+                    "active_calibration_path": "",
+                })
+            st.success(
+                f"✅ {_pd.shape[0]} × {_pd.shape[1]} px · {_pd.shape[2]} 밴드 "
+                f"· 다운샘플 ×{_pn_ds}"
+            )
+        except Exception:
+            st.error("❌ 로드 실패")
+            st.code(traceback.format_exc(), language="python")
+
+    _pdata = st.session_state.get("pn_data")
+    if _pdata is None:
+        st.info("📂 패널이 포함된 이미지를 열어주세요. 별도 reference 스캔도, "
+                "패널이 함께 찍힌 현장 이미지도 됩니다.")
+    else:
+        _pwl = st.session_state["pn_wl"]
+        _pH, _pW, _pB = _pdata.shape
+
+        st.markdown("#### 2️⃣ 패널 영역 지정")
+        _pm1, _pm2 = st.columns([3, 1])
+        with _pm1:
+            _pn_mouse_mode = st.radio(
+                "패널 영상 마우스 모드",
+                ("⬚ Box ROI", "✏️ Lasso ROI", "🔍 확대"),
+                horizontal=True,
+                key="pn_mouse_mode",
+            )
+        with _pm2:
+            st.write("")
+            if st.button("↩️ 확대 초기화", key="pn_zoom_reset", use_container_width=True):
+                st.session_state["pn_zoom_revision"] = (
+                    int(st.session_state.get("pn_zoom_revision", 0)) + 1
+                )
+                st.rerun()
+        _pl, _pr = st.columns([3, 2])
+
+        with _pl:
+            st.caption("Box Select 또는 Lasso Select로 **패널 하나**를 감싸세요. "
+                       "가장자리 그림자는 피하고 안쪽만 잡는 게 좋습니다.")
+            _pfig = go.Figure()
+            _pfig.add_trace(go.Image(z=st.session_state["pn_rgb"]))
+
+            # Outline panels already registered
+            for _i, _p in enumerate(st.session_state["pn_panels"], 1):
+                _b = _p["box"]
+                _pfig.add_shape(
+                    type="rect", x0=_b[2], x1=_b[3], y0=_b[0], y1=_b[1],
+                    line=dict(color="#00e5ff", width=2),
+                )
+                _pfig.add_annotation(
+                    x=_b[2], y=_b[0], text=f"{_i}", showarrow=False,
+                    font=dict(color="#00e5ff", size=13), yshift=10,
+                )
+
+            _pfig.update_layout(
+                dragmode=(
+                    "zoom" if _pn_mouse_mode == "🔍 확대"
+                    else "lasso" if _pn_mouse_mode == "✏️ Lasso ROI"
+                    else "select"
+                ),
+                margin=dict(l=0, r=0, t=0, b=0),
+                height=520,
+                newselection=dict(line=dict(color="#ffd54f", width=3)),
+                uirevision=(
+                    f"{st.session_state.get('pn_file', '')}|"
+                    f"{st.session_state.get('pn_zoom_revision', 0)}"
+                ),
+            )
+            _pfig.update_xaxes(showticklabels=False)
+            _pfig.update_yaxes(showticklabels=False)
+
+            _pev = st.plotly_chart(
+                _pfig, key="pn_image_chart", on_select="rerun",
+                selection_mode=("box", "lasso"), use_container_width=True,
+                config=_ROI_PLOTLY_CONFIG,
+            )
+            if _pev is not None and hasattr(_pev, "selection"):
+                _rg = _ru.selection_to_region(_pev.selection, _pH, _pW)
+                if _rg is not None:
+                    st.session_state["pn_region"] = _rg
+
+        with _pr:
+            _reg = st.session_state.get("pn_region")
+            if not _reg:
+                st.info("⬅️ 이미지에서 패널 영역을 드래그하세요.")
+            else:
+                _b = _reg["roi"]
+                st.write(f"선택 영역: row `{_b[0]}:{_b[1]}`, col `{_b[2]}:{_b[3]}`")
+                try:
+                    _pix, _, _ = _ru.region_pixels(_pdata, _reg)
+                    _unif = float(_pix.mean(axis=1).std() /
+                                  max(_pix.mean(), 1e-9))
+                    _mx = float(_pix.max())
+                    _sat = _rad.panel_saturation_metrics(
+                        _pix,
+                        observed_max=st.session_state.get("pn_source_max"),
+                    )
+
+                    _m1, _m2, _m3, _m4 = st.columns(4)
+                    _m1.metric("픽셀 수", f"{len(_pix):,}")
+                    _m2.metric("균일도 (CV)", f"{_unif:.3f}",
+                               help="0.10 미만이면 균일하게 잘 잡은 것입니다.")
+                    _m3.metric("선택 최대 DN", f"{_mx:,.0f}")
+                    _m4.metric(
+                        "포화 밴드",
+                        f"{_sat['saturated_band_count']} / {_pB}",
+                        help=(
+                            f"추정 ADC 상한: {_sat.get('adc_ceiling') or '알 수 없음'} · "
+                            "한 밴드에서 선택 픽셀의 1% 이상이 상한 99%에 도달하거나, "
+                            "상단에서 반복되는 clipping plateau가 검출되면 제외"
+                        ),
+                    )
+                    if _unif > 0.10:
+                        st.warning(
+                            "⚠️ 균일도가 낮습니다. 배경이나 그림자가 섞였을 수 있으니 "
+                            "영역을 패널 안쪽으로 좁혀보세요."
+                        )
+                    if not _sat["usable"]:
+                        _bad_indices = _sat["saturated_band_indices"]
+                        _bad_labels = [
+                            (
+                                f"{_pwl[index]:.1f} nm"
+                                if _pwl is not None and len(_pwl) == _pB
+                                else f"band {index}"
+                            )
+                            for index in _bad_indices[:8]
+                        ]
+                        st.warning(
+                            "⚠️ 이 패널은 일부 파장에서만 사용됩니다. "
+                            f"포화 밴드 {_sat['saturated_band_count']}개가 검출되었습니다"
+                            + (f" ({', '.join(_bad_labels)})" if _bad_labels else "")
+                            + ". 해당 밴드의 가중치는 자동으로 0이 되고, 등록한 더 낮은 "
+                            "반사율 패널이 그 구간을 담당합니다."
+                        )
+                    elif _sat["near_band_count"]:
+                        st.warning(
+                            f"⚠️ 포화 직전 밴드가 {_sat['near_band_count']}개 있습니다. "
+                            "현재는 사용할 수 있지만 노출을 낮춘 reference가 더 안전합니다."
+                        )
+
+                    _pna, _pnb = st.columns([2, 1])
+                    with _pna:
+                        _pname = st.text_input(
+                            "패널 이름", value=f"panel_{len(st.session_state['pn_panels'])+1}",
+                            key="pn_name_input",
+                        )
+                    with _pnb:
+                        _prefl = st.number_input(
+                            "반사율", min_value=0.0, max_value=1.0,
+                            value=0.99, step=0.01, format="%.3f",
+                            key="pn_refl_input",
+                            help="패널 성적서의 공칭 반사율 (예: 0.99, 0.50, 0.25)",
+                        )
+
+                    if st.button(
+                        "➕ 이 영역을 패널로 추가",
+                        type="primary",
+                        use_container_width=True,
+                        key="pn_add",
+                        disabled=(_sat["saturated_band_count"] >= _pB),
+                        help=(
+                            "모든 밴드가 포화된 영역은 등록할 수 없습니다."
+                            if _sat["saturated_band_count"] >= _pB else None
+                        ),
+                    ):
+                        _spec = np.median(_ru.region_pixels(_pdata, _reg)[0], axis=0)
+                        st.session_state["pn_panels"].append({
+                            "name": _pname,
+                            "reflectance": float(_prefl),
+                            "box": list(_b),
+                            "region": dict(_reg),
+                            "uniformity": _unif,
+                            "max_dn": _mx,
+                            "spectrum": _spec,
+                            "saturation": _sat,
+                        })
+                        st.session_state["pn_fit"] = None
+                        st.session_state["pn_preview_rgb"] = None
+                        st.session_state["pn_saved_calibration"] = ""
+                        st.session_state["active_calibration_path"] = ""
+                        st.session_state["pn_region"] = None
+                        st.rerun()
+                except Exception:
+                    st.error("❌ 영역 계산 실패")
+                    st.code(traceback.format_exc(), language="python")
+
+            if st.button("🔍 패널 자동 탐지 시도", use_container_width=True,
+                         key="pn_auto"):
+                try:
+                    with st.spinner("탐지 중..."):
+                        _auto = _rad.detect_panels(_pdata, n_panels=4)
+                    if not _auto:
+                        st.warning("패널 후보를 찾지 못했습니다. 수동으로 지정해 주세요.")
+                    else:
+                        _auto_valid = []
+                        _auto_rejected = []
+                        for i, p in enumerate(_auto, 1):
+                            _ab = p["box"]
+                            _apix = _pdata[_ab[0]:_ab[1], _ab[2]:_ab[3], :].reshape(
+                                -1, _pB
+                            )
+                            _asat = _rad.panel_saturation_metrics(
+                                _apix,
+                                observed_max=st.session_state.get("pn_source_max"),
+                            )
+                            if _asat["saturated_band_count"] >= _pB:
+                                _auto_rejected.append(
+                                    f"auto_{i} (전 밴드 포화)"
+                                )
+                                continue
+                            _auto_valid.append({
+                                "name": f"auto_{i}",
+                                "reflectance": 0.0,
+                                "box": _ab,
+                                "region": {"type": "box", "roi": list(_ab)},
+                                "uniformity": _rad.panel_uniformity(_pdata, _ab),
+                                "max_dn": float(np.max(_apix)),
+                                "spectrum": np.median(_apix, axis=0),
+                                "saturation": _asat,
+                            })
+                        st.session_state["pn_panels"] = _auto_valid
+                        st.session_state["pn_auto_rejected"] = _auto_rejected
+                        st.session_state["pn_fit"] = None
+                        st.session_state["pn_preview_rgb"] = None
+                        st.session_state["pn_saved_calibration"] = ""
+                        st.session_state["active_calibration_path"] = ""
+                        if _auto_rejected:
+                            st.error(
+                                "⛔ 포화되어 자동 제외된 후보: "
+                                + ", ".join(_auto_rejected)
+                            )
+                        st.warning(
+                            "자동 탐지 결과입니다. **각 패널의 반사율을 아래 표에서 "
+                            "직접 입력**하고, 박스가 실제 패널과 맞는지 확인하세요."
+                        )
+                        st.rerun()
+                except Exception:
+                    st.error("❌ 자동 탐지 실패")
+                    st.code(traceback.format_exc(), language="python")
+
+            if st.session_state.get("pn_auto_rejected"):
+                st.error(
+                    "⛔ 포화되어 자동 제외된 후보: "
+                    + ", ".join(st.session_state["pn_auto_rejected"])
+                )
+
+        # ── Step 3: registered panels & calibration ───────────
+        _panels = st.session_state["pn_panels"]
+        if _panels:
+            st.markdown("#### 3️⃣ 등록된 패널")
+            st.caption(
+                "반사율은 패널의 인증값을 그대로 입력합니다: 50%=0.500, 99%=0.990. "
+                "프로그램은 입력값으로 절대 반사율 계수를 계산하며 50%를 99%로 "
+                "임의 변경하지 않습니다."
+            )
+
+            for _panel in _panels:
+                if "saturation" not in _panel:
+                    _pb = _panel["box"]
+                    _ppix = _pdata[
+                        _pb[0]:_pb[1], _pb[2]:_pb[3], :
+                    ].reshape(-1, _pB)
+                    _panel["saturation"] = _rad.panel_saturation_metrics(
+                        _ppix,
+                        observed_max=st.session_state.get("pn_source_max"),
+                    )
+
+            _edit = st.data_editor(
+                pd.DataFrame([{
+                    "패널": p["name"],
+                    "반사율": p["reflectance"],
+                    "상태": (
+                        "전 밴드 사용" if p["saturation"]["usable"]
+                        else (
+                            "사용 불가" if p["saturation"]["saturated_band_count"] >= _pB
+                            else "부분 사용 (포화 밴드 자동 제외)"
+                        )
+                    ),
+                    "포화 밴드": p["saturation"]["saturated_band_count"],
+                    "box": str(p["box"]),
+                    "평균 DN": round(float(np.mean(p["spectrum"])), 1),
+                    "최대 DN": round(p["max_dn"], 1),
+                    "균일도": (round(p["uniformity"], 3)
+                              if p["uniformity"] == p["uniformity"] else None),
+                } for p in _panels]),
+                column_config={
+                    "반사율": st.column_config.NumberColumn(
+                        min_value=0.0, max_value=1.0, step=0.01, format="%.3f",
+                    ),
+                    "상태": st.column_config.TextColumn(disabled=True),
+                    "포화 밴드": st.column_config.NumberColumn(disabled=True),
+                    "box": st.column_config.TextColumn(disabled=True),
+                    "평균 DN": st.column_config.NumberColumn(disabled=True),
+                    "최대 DN": st.column_config.NumberColumn(disabled=True),
+                    "균일도": st.column_config.NumberColumn(disabled=True),
+                },
+                hide_index=True, use_container_width=True, key="pn_editor",
+            )
+            _panel_values_changed = False
+            for _p, (_, _row) in zip(_panels, _edit.iterrows()):
+                _panel_values_changed |= (
+                    float(_p["reflectance"]) != float(_row["반사율"])
+                    or str(_p["name"]) != str(_row["패널"])
+                )
+                _p["reflectance"] = float(_row["반사율"])
+                _p["name"] = str(_row["패널"])
+            if _panel_values_changed:
+                st.session_state["pn_fit"] = None
+                st.session_state["pn_preview_rgb"] = None
+                st.session_state["pn_saved_calibration"] = ""
+                st.session_state["active_calibration_path"] = ""
+
+            st.markdown("#### 4️⃣ 센서 Dark 설정")
+            st.caption(
+                "Dark 파일이 없으면 모든 밴드에 같은 DN을 적용할 수 있습니다. "
+                "기본값은 100이며, 실측 Dark가 있으면 파일 방식이 더 정확합니다."
+            )
+            _dark_mode = st.radio(
+                "Dark 준비 방법",
+                ("수동 상수 DN", "실측 Dark 파일"),
+                horizontal=True,
+                key="pn_dark_mode",
+                help="Dark 영상이 없으면 수동 상수 DN을 사용하세요.",
+            )
+            if st.session_state.get("pn_dark_active_mode") != _dark_mode:
+                st.session_state["pn_fit"] = None
+                st.session_state["pn_preview_rgb"] = None
+                st.session_state["pn_saved_calibration"] = ""
+                st.session_state["active_calibration_path"] = ""
+                st.session_state["pn_dark_active_mode"] = _dark_mode
+
+            _dark_ready = False
+            if _dark_mode == "수동 상수 DN":
+                _manual_dark_dn = st.number_input(
+                    "모든 밴드에 적용할 Dark DN",
+                    min_value=0.0,
+                    value=100.0,
+                    step=1.0,
+                    format="%.1f",
+                    key="pn_manual_dark_dn",
+                    help="현재 센서에서 확인한 평균 Dark 값이 있으면 입력하세요. 기본값은 100입니다.",
+                )
+                _current_dark_qc = st.session_state.get("pn_dark_qc") or {}
+                _manual_changed = (
+                    _current_dark_qc.get("source_type") != "synthetic_constant"
+                    or float(_current_dark_qc.get("constant_dn", -1.0))
+                    != float(_manual_dark_dn)
+                    or np.asarray(
+                        st.session_state.get("pn_dark_spectrum", [])
+                    ).shape != (_pB,)
+                )
+                if _manual_changed:
+                    _dark_spec, _dark_noise, _dark_qc = _rad.constant_dark_reference(
+                        _pB, float(_manual_dark_dn)
+                    )
+                    st.session_state.update({
+                        "pn_dark_path": "",
+                        "pn_dark_spectrum": _dark_spec,
+                        "pn_dark_noise": _dark_noise,
+                        "pn_dark_qc": _dark_qc,
+                        "pn_fit": None,
+                        "pn_preview_rgb": None,
+                        "pn_saved_calibration": "",
+                        "active_calibration_path": "",
+                    })
+                _dark_ready = True
+                st.warning(
+                    f"⚠️ 합성 Dark 사용 중: 전 밴드 DN {float(_manual_dark_dn):,.1f}. "
+                    "빠른 분석용이며, 논문용 최종 처리에는 같은 설정으로 찍은 실측 Dark를 권장합니다."
+                )
+            else:
+                _dark_candidates: list[str] = []
+                if data_src == "로컬 폴더" and local_folder:
+                    _dark_candidates.extend(_scan_local_hsi_files(local_folder))
+                try:
+                    _panel_parent = Path(st.session_state["pn_file"]).expanduser().parent
+                    if _panel_parent.is_dir():
+                        _dark_candidates.extend(
+                            str(item) for item in _panel_parent.iterdir()
+                            if item.is_file() and item.suffix.lower() in _LOCAL_HSI_EXTS
+                        )
+                except Exception:
+                    pass
+                if st.session_state.get("pn_dark_path"):
+                    _dark_candidates.insert(0, st.session_state["pn_dark_path"])
+                _dark_candidates = list(dict.fromkeys(_dark_candidates))
+                _dark_candidates.sort(
+                    key=lambda value: (
+                        not any(token in Path(value).name.lower()
+                                for token in ("dark", "black", "shutter")),
+                        Path(value).name.lower(),
+                    )
+                )
+                _dark_manual_path = "__manual_dark_path__"
+                _dark_options = _dark_candidates + [_dark_manual_path]
+                _dark_current = st.session_state.get("pn_dark_path", "")
+                if _dark_current in _dark_options:
+                    _dark_index = _dark_options.index(_dark_current)
+                else:
+                    _dark_index = 0 if _dark_candidates else len(_dark_options) - 1
+
+                _dc1, _dc2, _dc3 = st.columns([5, 1, 1])
+                with _dc1:
+                    _dark_choice = st.selectbox(
+                        "Sensor dark 파일",
+                        _dark_options,
+                        index=_dark_index,
+                        format_func=lambda value: (
+                            "직접 경로 입력…" if value == _dark_manual_path
+                            else Path(value).name
+                        ),
+                        key="pn_dark_choice",
+                    )
+                    if _dark_choice == _dark_manual_path:
+                        _dark_path = st.text_input(
+                            "Dark 파일 직접 경로",
+                            value=st.session_state.get("pn_dark_path", ""),
+                            placeholder="D:/references/dark_20260821_090000.swir.hdr",
+                            key="pn_dark_manual_path",
+                        )
+                    else:
+                        _dark_path = _dark_choice
+                with _dc2:
+                    st.write("")
+                    _dark_load = st.button(
+                        "🌑 Dark 로드", use_container_width=True, key="pn_dark_load"
+                    )
+                with _dc3:
+                    st.write("")
+                    st.button(
+                        "🪟 선택",
+                        use_container_width=True,
+                        key="pn_dark_native_file",
+                        on_click=_browse_file_into_state,
+                        args=("pn_dark_manual_path", "Sensor Dark 파일 선택"),
+                        kwargs={
+                            "set_values": {"pn_dark_choice": _dark_manual_path}
+                        },
+                        disabled=not _native_dialogs_available(),
+                        help="Windows 탐색기에서 실측 Dark 파일을 선택합니다.",
+                    )
+
+                if _dark_load:
+                    try:
+                        if not str(_dark_path).strip():
+                            raise ValueError("Sensor dark 파일을 선택하세요.")
+                        with st.spinner("Sensor dark 검사 중..."):
+                            from src.data_loader import HyperspectralLoader as _DarkLoader
+
+                            _dd, _dm = _DarkLoader({
+                                "spatial_downsample": max(1, int(_pn_ds))
+                            }).load_local(str(_dark_path).strip())
+                            if _dd.shape[2] != _pB:
+                                raise ValueError(
+                                    f"Dark 밴드 수({_dd.shape[2]})와 패널 영상({_pB})이 다릅니다."
+                                )
+                            _dwl = _dm.get("wavelengths")
+                            if _pwl is not None and _dwl is not None and not np.allclose(
+                                _pwl, _dwl, rtol=0, atol=1.0
+                            ):
+                                raise ValueError("Dark와 패널 영상의 파장축이 다릅니다.")
+                            _dark_spec, _dark_qc = _rad.robust_reference_spectrum(_dd)
+                            _dark_qc = dict(_dark_qc)
+                            _dark_qc.update({
+                                "source_type": "measured_file",
+                                "source": str(_dark_path).strip(),
+                            })
+                        st.session_state.update({
+                            "pn_dark_path": str(_dark_path).strip(),
+                            "pn_dark_spectrum": _dark_spec,
+                            "pn_dark_noise": np.asarray(
+                                _dark_qc.get("noise_mad_by_band", np.ones(_pB)),
+                                dtype=np.float32,
+                            ),
+                            "pn_dark_qc": _dark_qc,
+                            "pn_fit": None,
+                            "pn_preview_rgb": None,
+                            "pn_saved_calibration": "",
+                            "active_calibration_path": "",
+                        })
+                        st.success(
+                            f"✅ Dark 로드 완료 · 중앙 DN "
+                            f"{float(np.nanmedian(_dark_spec)):,.1f}"
+                        )
+                        st.rerun()
+                    except Exception:
+                        st.error("❌ Sensor dark 로드 실패")
+                        st.code(traceback.format_exc(), language="python")
+
+                _dark_qc_now = st.session_state.get("pn_dark_qc") or {}
+                _dark_ready = (
+                    st.session_state.get("pn_dark_spectrum") is not None
+                    and _dark_qc_now.get("source_type") == "measured_file"
+                )
+                if _dark_ready:
+                    st.success(
+                        "✅ 사용 중인 Dark: "
+                        f"`{Path(st.session_state['pn_dark_path']).name}` · "
+                        f"픽셀 {_dark_qc_now.get('sample_pixels', 0):,}개"
+                    )
+                else:
+                    st.info("실측 Dark 파일을 선택하고 `Dark 로드`를 누르세요.")
+
+            _c1, _c2 = st.columns(2)
+            with _c1:
+                if st.button("🗑️ 패널 목록 비우기", use_container_width=True,
+                             key="pn_clear"):
+                    st.session_state["pn_panels"] = []
+                    st.session_state["pn_fit"] = None
+                    st.session_state["pn_preview_rgb"] = None
+                    st.session_state["pn_saved_calibration"] = ""
+                    st.session_state["active_calibration_path"] = ""
+                    st.rerun()
+            with _c2:
+                # Key must differ from the "pn_fit" session key below — a
+                # widget key overwrites that entry with the button's bool.
+                _fit_btn = st.button(
+                    "✨ 자동 반사율 보정 계산",
+                    type="primary",
+                    use_container_width=True,
+                    key="pn_fit_btn",
+                    disabled=not _dark_ready,
+                    help=(
+                        "Dark 설정을 완료하세요."
+                        if not _dark_ready else None
+                    ),
+                )
+
+            # Panel spectra plot
+            _spfig = go.Figure()
+            _xax = _pwl if (_pwl and len(_pwl) == _pB) else list(range(_pB))
+            for _p in _panels:
+                _spfig.add_trace(go.Scatter(
+                    x=_xax, y=_p["spectrum"], mode="lines",
+                    name=f"{_p['name']} (R={_p['reflectance']:.2f})",
+                ))
+            _spfig.update_layout(
+                height=300, xaxis_title="Wavelength (nm)", yaxis_title="DN",
+                margin=dict(l=50, r=10, t=30, b=40),
+                legend=dict(orientation="h", y=1.15),
+                title="패널 raw DN 스펙트럼",
+            )
+            st.plotly_chart(_spfig, use_container_width=True, key="pn_spec_chart")
+
+            if _fit_btn:
+                try:
+                    _fit_panels = [
+                        p for p in _panels
+                        if float(p.get("reflectance", 0.0)) > 0
+                        and (p.get("saturation") or {}).get(
+                            "saturated_band_count", _pB
+                        ) < _pB
+                    ]
+                    _excluded_panels = [
+                        p for p in _panels
+                        if not (
+                            float(p.get("reflectance", 0.0)) > 0
+                            and (p.get("saturation") or {}).get(
+                                "saturated_band_count", _pB
+                            ) < _pB
+                        )
+                    ]
+                    if _excluded_panels:
+                        st.warning(
+                            "반사율이 없거나 전 밴드가 포화되어 자동 제외: "
+                            + ", ".join(p["name"] for p in _excluded_panels)
+                        )
+                    if not _fit_panels:
+                        raise ValueError(
+                            "사용 가능한 패널이 없습니다. 포화되지 않은 영역을 다시 지정하세요."
+                        )
+                    _dark_spec = st.session_state.get("pn_dark_spectrum")
+                    if _dark_spec is None or not _dark_ready:
+                        raise ValueError("Dark 설정을 완료하세요.")
+                    _rs = [p["reflectance"] for p in _fit_panels]
+                    if any(r <= 0 for r in _rs):
+                        raise ValueError("모든 패널의 반사율을 0보다 크게 입력하세요.")
+
+                    _dns = [p["spectrum"] for p in _fit_panels]
+                    _panel_weights = np.asarray([
+                        (p.get("saturation") or {}).get(
+                            "headroom_weight_by_band", np.ones(_pB)
+                        )
+                        for p in _fit_panels
+                    ], dtype=np.float64)
+                    _a, _bb, _q = _rad.weighted_dark_panel_calibration(
+                        _dns,
+                        _rs,
+                        np.asarray(_dark_spec),
+                        panel_band_weights=_panel_weights,
+                        dark_noise=st.session_state.get("pn_dark_noise"),
+                    )
+                    _method = _q["method"]
+                    if _q["invalid_band_count"] >= _pB:
+                        raise ValueError(
+                            "유효한 보정 밴드가 없습니다. 패널의 포화와 Dark 설정을 확인하세요."
+                        )
+
+                    _preview_cube = _rad.apply_resolved_calibration(
+                        _pdata, {"a": _a, "b": _bb}
+                    )
+                    _preview_rgb = _ru.display_rgb(_preview_cube, _pwl)
+                    del _preview_cube
+
+                    _cal_dir = Path(output_dir or "./output").expanduser() / "calibration"
+                    _cal_dir.mkdir(parents=True, exist_ok=True)
+                    _cal_path = _cal_dir / (
+                        f"{Path(st.session_state['pn_file']).stem}"
+                        "_weighted_dark_calibration.npz"
+                    )
+                    _weights_used = np.asarray(_q["panel_weights"])
+                    _dark_qc_used = st.session_state.get("pn_dark_qc") or {}
+                    _dark_source_type = _dark_qc_used.get("source_type", "unknown")
+                    _dark_source = (
+                        str(Path(st.session_state["pn_dark_path"]).resolve())
+                        if _dark_source_type == "measured_file"
+                        else f"manual constant DN {float(_dark_qc_used.get('constant_dn', 100.0)):.1f}"
+                    )
+                    _meta = {
+                        "method": _method,
+                        "formula": _q["formula"],
+                        "source_image": str(Path(st.session_state["pn_file"]).resolve()),
+                        "dark_source": _dark_source,
+                        "dark_source_type": _dark_source_type,
+                        "dark_is_measured": _dark_source_type == "measured_file",
+                        "manual_dark_dn": (
+                            float(_dark_qc_used.get("constant_dn"))
+                            if _dark_source_type == "synthetic_constant" else None
+                        ),
+                        "panels": [
+                            {
+                                "name": panel["name"],
+                                "reflectance": float(panel["reflectance"]),
+                                "box": panel["box"],
+                                "saturated_band_indices": (
+                                    panel.get("saturation") or {}
+                                ).get("saturated_band_indices", []),
+                                "weight_by_band": _weights_used[index].round(6).tolist(),
+                            }
+                            for index, panel in enumerate(_fit_panels)
+                        ],
+                        "invalid_band_indices": _q["invalid_band_indices"],
+                        "fallback_band_indices": _q["fallback_band_indices"],
+                        "blended_band_count": _q["blended_band_count"],
+                        "median_coefficient_cv": _q["median_coefficient_cv"],
+                    }
+                    _saved_cal = _rad.save_calibration(
+                        str(_cal_path), _a, _bb, wavelengths=_pwl, meta=_meta
+                    )
+
+                    st.session_state["pn_fit"] = {
+                        "a": _a, "b": _bb, "quality": _q, "method": _method,
+                        "reflectances": _rs,
+                        "names": [p["name"] for p in _fit_panels],
+                        "boxes": [p["box"] for p in _fit_panels],
+                        "excluded_panels": [p["name"] for p in _excluded_panels],
+                        "saved_path": _saved_cal,
+                        "dark_source_type": _dark_source_type,
+                        "manual_dark_dn": _dark_qc_used.get("constant_dn"),
+                    }
+                    st.session_state["pn_preview_rgb"] = _preview_rgb
+                    st.session_state["pn_saved_calibration"] = _saved_cal
+                    st.session_state["active_calibration_path"] = _saved_cal
+                    st.success(
+                        f"✅ 자동 보정 완료 · 패널 {len(_fit_panels)}장 · "
+                        f"유효 밴드 {_pB - _q['invalid_band_count']}/{_pB}"
+                    )
+                except Exception:
+                    st.error("❌ 계산 실패")
+                    st.code(traceback.format_exc(), language="python")
+
+            _fit = st.session_state.get("pn_fit")
+            if _fit:
+                st.markdown("#### 5️⃣ 자동 반사율 보정 결과")
+                _q = _fit["quality"]
+                _qa, _qb, _qc, _qd = st.columns(4)
+                _qa.metric("유효 밴드", f"{_pB - _q['invalid_band_count']} / {_pB}")
+                _qb.metric("다중 패널 결합", f"{_q['blended_band_count']} 밴드")
+                _qc.metric("낮은 패널 대체", f"{_q['fallback_band_count']} 밴드")
+                _cv_value = _q.get("median_coefficient_cv")
+                _qd.metric(
+                    "패널 일치도(CV)",
+                    "—" if _cv_value is None else f"{100 * _cv_value:.2f}%",
+                    help="공통 유효 파장에서 패널별 보정계수가 얼마나 일치하는지 나타냅니다.",
+                )
+                if _q["invalid_band_count"]:
+                    st.warning(
+                        f"⚠️ 어떤 패널에서도 신뢰할 신호가 없었던 "
+                        f"{_q['invalid_band_count']}개 밴드는 NaN으로 저장되며 분석에서 제외됩니다."
+                    )
+                if _fit.get("dark_source_type") == "synthetic_constant":
+                    st.warning(
+                        "⚠️ 이 보정은 실측 Dark가 아니라 전 밴드 상수 DN "
+                        f"{float(_fit.get('manual_dark_dn', 100.0)):,.1f}을 사용했습니다. "
+                        "결과 파일에도 합성 Dark 사용 이력이 저장됩니다."
+                    )
+                if _cv_value is not None and _cv_value > 0.05:
+                    st.warning(
+                        "⚠️ 패널 간 보정계수 차이가 큽니다. 패널의 높이·각도·오염 또는 "
+                        "조명 변화를 확인하세요."
+                    )
+
+                _wfig = go.Figure()
+                _weights_view = np.asarray(_q["panel_weights"])
+                for _index, _name in enumerate(_fit["names"]):
+                    _wfig.add_trace(go.Scatter(
+                        x=_xax, y=_weights_view[_index], mode="lines",
+                        name=f"{_name} 사용 가중치",
+                    ))
+                _wfig.update_layout(
+                    height=300, xaxis_title="Wavelength (nm)",
+                    yaxis_title="자동 사용 가중치", yaxis_range=[-0.03, 1.03],
+                    margin=dict(l=50, r=10, t=35, b=40),
+                    legend=dict(orientation="h", y=1.18),
+                    title="파장별 패널 결합 — 포화에 가까워질수록 가중치가 부드럽게 감소",
+                )
+                st.plotly_chart(_wfig, use_container_width=True, key="pn_weight_chart")
+
+                _cfig = go.Figure()
+                _cfig.add_trace(go.Scatter(x=_xax, y=_fit["a"], mode="lines",
+                                           name="a (기울기)", yaxis="y1"))
+                _cfig.add_trace(go.Scatter(x=_xax, y=_fit["b"], mode="lines",
+                                           name="b (절편)", yaxis="y2",
+                                           line=dict(dash="dash")))
+                _cfig.update_layout(
+                    height=320, xaxis_title="Wavelength (nm)",
+                    yaxis=dict(title="a"),
+                    yaxis2=dict(title="b", overlaying="y", side="right"),
+                    margin=dict(l=50, r=50, t=30, b=40),
+                    legend=dict(orientation="h", y=1.15),
+                    title="Dark 기준 가중 보정계수  (R = a·DN + b)",
+                )
+                st.plotly_chart(_cfig, use_container_width=True, key="pn_coef_chart")
+                st.caption(
+                    "b는 선택한 실측 또는 수동 Dark에서 계산됩니다. 샘플 스펙트럼을 억지로 "
+                    "평활화하지 않고 패널 가중치만 부드럽게 전환합니다."
+                )
+
+                if st.session_state.get("pn_preview_rgb") is not None:
+                    _pv1, _pv2 = st.columns(2)
+                    with _pv1:
+                        st.image(
+                            st.session_state["pn_rgb"],
+                            caption="원본 DN RGB 미리보기",
+                            use_container_width=True,
+                        )
+                    with _pv2:
+                        st.image(
+                            st.session_state["pn_preview_rgb"],
+                            caption="반사율 보정 RGB 미리보기",
+                            use_container_width=True,
+                        )
+                    st.caption(
+                        "RGB는 화면 확인을 위한 대비 스트레치입니다. 실제 저장 스펙트럼과 "
+                        "BIL에는 계산된 반사율 값이 그대로 유지됩니다."
+                    )
+
+                st.success(
+                    "✅ 보정파일이 자동 저장되어 전체 필드 분석에 연결되었습니다: "
+                    f"`{Path(_fit['saved_path']).resolve()}`"
+                )
+
+                _export_factor = st.selectbox(
+                    "반사율 BIL 공간 binning",
+                    [1, 2, 4, 8],
+                    index=2,
+                    format_func=lambda value: (
+                        "원본 해상도" if value == 1 else f"{value}×{value} binning"
+                    ),
+                    key="pn_export_bin",
+                    help="대용량 현장 데이터는 4×4를 기본 권장합니다.",
+                )
+                _is_envi_source = Path(st.session_state["pn_file"]).suffix.lower() in {
+                    ".hdr", ".bil", ".bip", ".bsq", ".raw", ".img", ".dat"
+                }
+                if st.button(
+                    "💾 현재 영상 반사율 BIL 만들기",
+                    type="primary",
+                    use_container_width=True,
+                    key="pn_export_reflectance",
+                    disabled=not _is_envi_source,
+                    help=(None if _is_envi_source else "현재는 ENVI/BIL 입력만 지원합니다."),
+                ):
+                    try:
+                        import time as _export_time
+
+                        _reflectance_dir = (
+                            Path(output_dir or "./output").expanduser() / "reflectance"
+                        )
+                        _reflectance_dir.mkdir(parents=True, exist_ok=True)
+                        _export_stem = Path(st.session_state["pn_file"]).stem
+                        _export_path = _reflectance_dir / (
+                            f"{_export_stem}_reflectance_bin{_export_factor}.bil"
+                        )
+                        if _export_path.exists() or _export_path.with_suffix(".hdr").exists():
+                            _export_path = _reflectance_dir / (
+                                f"{_export_stem}_reflectance_bin{_export_factor}_"
+                                f"{_export_time.strftime('%Y%m%d_%H%M%S')}.bil"
+                            )
+                        with st.spinner("반사율 BIL을 행 단위로 저장 중..."):
+                            _exported = _rad.export_calibrated_binned_envi(
+                                st.session_state["pn_file"],
+                                _fit["saved_path"],
+                                _export_path,
+                                bin_factor=int(_export_factor),
+                            )
+                        st.success(
+                            "✅ 반사율 BIL 저장 완료: "
+                            f"`{Path(_exported['data_file']).resolve()}`"
+                        )
+                    except Exception:
+                        st.error("❌ 반사율 BIL 저장 실패")
+                        st.code(traceback.format_exc(), language="python")
+
+    st.divider()
+    _wd_advanced_box = st.expander(
+        "⚙️ 고급: 여러 측정시각의 White/Dark 프로파일 관리",
+        expanded=False,
+    )
+    _wd_advanced_box.__enter__()
+    st.markdown("### 🌗 White + 센서 Dark 보정 프로파일")
+    st.caption(
+        "White 원스펙트럼과 렌즈를 막거나 셔터를 닫아 획득한 센서 dark current를 "
+        "함께 저장합니다. 프로파일 폴더를 분석에 지정하면 대상 파일의 촬영시각과 "
+        "가장 가까운 White가 자동 선택됩니다."
+    )
+    st.warning(
+        "여기서 Dark는 검은색 패널이 아니라 반드시 같은 센서 설정으로 획득한 "
+        "센서 dark current 영상이어야 합니다."
+    )
+
+    _all_registered_panels = st.session_state.get("pn_panels") or []
+    _saturated_white_panels = [
+        panel for panel in _all_registered_panels
+        if not (panel.get("saturation") or {}).get("usable", False)
+    ]
+    _available_panels = [
+        panel for panel in _all_registered_panels
+        if (panel.get("saturation") or {}).get("usable", False)
+        and float(panel.get("reflectance", 0.0)) > 0
+    ]
+    if _saturated_white_panels:
+        st.error(
+            "⛔ White 후보에서 자동 제외된 포화 패널: "
+            + ", ".join(panel["name"] for panel in _saturated_white_panels)
+        )
+    _white_modes = ["균일한 White 영상 전체 중앙값"]
+    if _available_panels and st.session_state.get("pn_data") is not None:
+        _white_modes.append("현재 이미지에서 등록한 White ROI")
+    _wd_white_mode = st.radio(
+        "White 스펙트럼 추출 방식", _white_modes, horizontal=True,
+        key="wd_white_mode",
+    )
+
+    _wd_white_path = ""
+    _wd_panel_index = 0
+    _selected_white_panel = None
+    if _wd_white_mode == "현재 이미지에서 등록한 White ROI":
+        _wd_panel_index = st.selectbox(
+            "White ROI", range(len(_available_panels)),
+            format_func=lambda i: (
+                f"{_available_panels[i]['name']} · "
+                f"R={_available_panels[i]['reflectance']:.3f}"
+            ),
+            key="wd_panel_index",
+        )
+        _selected_white_panel = _available_panels[int(_wd_panel_index)]
+        st.caption("등록 ROI의 픽셀별 중앙값을 다시 계산해 White 원스펙트럼으로 저장합니다.")
+    else:
+        _wd_white_path = st.text_input(
+            "균일한 White reference 영상 경로",
+            placeholder="D:/references/white_20260821_093000.vnir.hdr",
+            key="wd_white_path",
+            help="프레임 전체가 같은 White reference를 측정한 영상이어야 합니다.",
+        )
+
+    _wd_dark_path = st.text_input(
+        "센서 dark current 영상 경로",
+        placeholder="D:/references/dark_20260821_090000.vnir.hdr",
+        key="wd_dark_path",
+    )
+    _wd1, _wd2, _wd3 = st.columns(3)
+    with _wd1:
+        if _selected_white_panel is not None:
+            _wd_reflectance = float(_selected_white_panel["reflectance"])
+            st.metric("White 반사율 (등록값 자동 사용)", f"{_wd_reflectance:.3f}")
+        else:
+            _wd_reflectance = st.number_input(
+                "White 반사율", 0.01, 1.20, 0.99, 0.01,
+                key="wd_white_reflectance",
+            )
+    with _wd2:
+        _wd_ds = st.selectbox(
+            "Reference 읽기 다운샘플", [1, 2, 4, 8], index=2,
+            key="wd_reference_ds",
+            help="균일 프레임의 중앙값만 계산하므로 4를 권장합니다.",
+        )
+    with _wd3:
+        _wd_sensor = st.text_input(
+            "센서 구분", value="VNIR", key="wd_sensor",
+            help="예: VNIR, SWIR. 같은 센서 프로파일만 사용하세요.",
+        )
+
+    if _selected_white_panel is not None:
+        st.info(
+            f"선택한 패널은 R={_wd_reflectance:.3f}로 계산합니다. "
+            "50% 패널을 99%로 간주하지 않으며, 이 등록값과 센서 dark를 사용해 "
+            "대상 영상을 절대 반사율 척도로 변환합니다."
+        )
+        if _wd_reflectance < 0.90:
+            st.warning(
+                f"R={_wd_reflectance:.3f}보다 밝은 대상은 패널 범위 밖 외삽입니다. "
+                "계산은 가능하지만, 가능하면 포화되지 않은 더 밝은 패널도 함께 "
+                "측정해 선형성을 검증하세요."
+            )
+
+    _wd_time = st.text_input(
+        "White 측정시각 (선택, 비우면 파일명에서 자동 추출)",
+        placeholder="2026-08-21 09:30:00",
+        key="wd_white_time",
+    )
+    _wd4, _wd5 = st.columns(2)
+    with _wd4:
+        _wd_integration = st.text_input(
+            "Integration time (선택)", key="wd_integration_time"
+        )
+    with _wd5:
+        _wd_gain = st.text_input("Gain (선택)", key="wd_gain")
+    _wd_profile_dir = st.text_input(
+        "프로파일 저장 폴더", value="./calibration_profiles",
+        key="wd_profile_dir",
+    )
+
+    if st.button(
+        "💾 White/Dark 프로파일 생성", type="primary",
+        use_container_width=True, key="wd_profile_save",
+    ):
+        try:
+            from src.data_loader import HyperspectralLoader as _WDLoader
+
+            if not _wd_dark_path.strip():
+                raise ValueError("센서 dark current 영상 경로를 입력하세요.")
+            _wd_loader = _WDLoader({"spatial_downsample": int(_wd_ds)})
+
+            if _wd_white_mode == "현재 이미지에서 등록한 White ROI":
+                _selected_panel = _available_panels[int(_wd_panel_index)]
+                _white_pixels, _, _ = _ru.region_pixels(
+                    st.session_state["pn_data"],
+                    _selected_panel.get(
+                        "region", {"type": "box", "roi": _selected_panel["box"]}
+                    ),
+                )
+                _white_spec = np.median(_white_pixels, axis=0).astype(np.float32)
+                _white_wl = st.session_state.get("pn_wl")
+                _white_source = st.session_state.get("pn_file", "")
+                _white_qc = {
+                    "sample_pixels": int(len(_white_pixels)),
+                    "brightness_cv": float(
+                        np.std(np.mean(_white_pixels, axis=1)) /
+                        max(abs(np.mean(_white_pixels)), 1e-12)
+                    ),
+                    "roi": _selected_panel["box"],
+                }
+                _white_qc.update(
+                    _rad.panel_saturation_metrics(
+                        _white_pixels,
+                        observed_max=st.session_state.get("pn_source_max"),
+                    )
+                )
+            else:
+                if not _wd_white_path.strip():
+                    raise ValueError("균일한 White reference 영상 경로를 입력하세요.")
+                _white_cube, _white_meta = _wd_loader.load_local(_wd_white_path.strip())
+                _white_spec, _white_qc = _rad.robust_reference_spectrum(_white_cube)
+                _white_wl = _white_meta.get("wavelengths")
+                _white_source = _wd_white_path.strip()
+
+            if not _white_qc.get("usable", False):
+                raise ValueError(
+                    "White reference에서 포화 밴드가 "
+                    f"{_white_qc.get('saturated_band_count', 0)}개 검출되어 "
+                    "프로파일에서 자동 제외했습니다. 노출을 낮춰 다시 측정하거나 "
+                    "더 낮은 반사율 패널을 사용하세요."
+                )
+
+            _dark_cube, _dark_meta = _wd_loader.load_local(_wd_dark_path.strip())
+            _dark_spec, _dark_qc = _rad.robust_reference_spectrum(_dark_cube)
+            if not _dark_qc.get("usable", False):
+                raise ValueError(
+                    "센서 dark 영상에서 포화가 검출되었습니다. 올바른 dark current "
+                    "파일인지와 센서 설정을 확인하세요."
+                )
+            _dark_wl = _dark_meta.get("wavelengths")
+            if len(_white_spec) != len(_dark_spec):
+                raise ValueError("White와 dark 영상의 밴드 수가 다릅니다.")
+            if _white_wl is not None and _dark_wl is not None and not np.allclose(
+                _white_wl, _dark_wl, rtol=0, atol=1.0
+            ):
+                raise ValueError("White와 dark 영상의 파장축이 다릅니다.")
+
+            _white_dt = _rad.parse_acquisition_time(_wd_time or _white_source)
+            if _white_dt is None:
+                raise ValueError(
+                    "White 측정시각을 파일명에서 찾지 못했습니다. 직접 입력하세요."
+                )
+            _dark_dt = _rad.parse_acquisition_time(_wd_dark_path.strip())
+            _stamp = _white_dt.strftime("%Y%m%d_%H%M%S")
+            _sensor_slug = re.sub(r"[^0-9A-Za-z_-]+", "_", _wd_sensor.strip()) or "sensor"
+            _profile_path = Path(_wd_profile_dir).expanduser() / (
+                f"white_dark_{_sensor_slug}_{_stamp}.npz"
+            )
+            if _profile_path.exists():
+                raise FileExistsError(f"이미 존재하는 프로파일입니다: {_profile_path}")
+            _saved = _rad.save_white_dark_profile(
+                _profile_path, _white_spec, _dark_spec,
+                wavelengths=(_white_wl if _white_wl is not None else _dark_wl),
+                white_reflectance=float(_wd_reflectance),
+                white_time=_white_dt,
+                dark_time=_dark_dt,
+                meta={
+                    "sensor": _wd_sensor.strip(),
+                    "integration_time": _wd_integration.strip(),
+                    "gain": _wd_gain.strip(),
+                    "white_source": str(_white_source),
+                    "dark_source": _wd_dark_path.strip(),
+                    "white_qc": _white_qc,
+                    "dark_qc": _dark_qc,
+                },
+            )
+            st.session_state["wd_last_profile"] = _saved
+            st.success(f"✅ 프로파일 저장 완료: `{Path(_saved).resolve()}`")
+        except Exception:
+            st.error("❌ White/Dark 프로파일 생성 실패")
+            st.code(traceback.format_exc(), language="python")
+
+    if st.session_state.get("wd_last_profile"):
+        try:
+            _wd_loaded = _rad.load_white_dark_profile(st.session_state["wd_last_profile"])
+            _wd_x = _wd_loaded.get("wavelengths") or list(range(len(_wd_loaded["white"])))
+            _wd_fig = go.Figure()
+            _wd_fig.add_trace(go.Scatter(x=_wd_x, y=_wd_loaded["white"], name="White DN"))
+            _wd_fig.add_trace(go.Scatter(x=_wd_x, y=_wd_loaded["dark"], name="Sensor dark DN"))
+            _wd_fig.add_trace(go.Scatter(
+                x=_wd_x, y=_wd_loaded["white"] - _wd_loaded["dark"],
+                name="White - Dark", line=dict(dash="dash"),
+            ))
+            _wd_fig.update_layout(
+                height=330, xaxis_title="Wavelength (nm)", yaxis_title="DN",
+                title="저장된 White/Dark 보정 프로파일",
+                legend=dict(orientation="h"),
+            )
+            st.plotly_chart(_wd_fig, use_container_width=True, key="wd_profile_plot")
+        except Exception:
+            st.warning("마지막 White/Dark 프로파일 미리보기를 불러오지 못했습니다.")
+
+    _wd_advanced_box.__exit__(None, None, None)
+
+
+# ============================================================
+# Tab 4 – Pixel labeling tool
 # ============================================================
 
 with tab_label:
