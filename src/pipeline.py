@@ -160,7 +160,6 @@ class Pipeline:
         if (
             not single_file
             and self.batch_summaries
-            and out_cfg.get("save_report", True)
             and self.reporter.options.get("daily_summary", True)
         ):
             ts = time.strftime("%Y%m%d_%H%M%S")
