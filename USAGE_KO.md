@@ -55,6 +55,9 @@ python -m streamlit run app.py
 python -m streamlit run app_en.py
 ```
 
+한글·영문 UI는 같은 분석 코드를 실행합니다. 영문 UI는 표시 문구만
+번역하므로 CERES, ROI, 패널 보정, 클러스터링, 리포트 기능이 동일합니다.
+
 브라우저가 자동으로 `http://localhost:8501`에서 열립니다.
 
 ### 사이드바 설정
@@ -87,6 +90,10 @@ python -m streamlit run app_en.py
 
 분석 완료 후 다음 파일이 생성됩니다:
 
+완료 화면의 **최근 분석 결과 열기** 영역에서 HTML 리포트를 선택해 기본 브라우저로
+바로 열거나, 결과 폴더를 Windows 파일 탐색기로 열 수 있습니다. Illinois Campus
+Cluster처럼 원격 서버에서 실행할 때는 **HTML 리포트 다운로드**를 사용하세요.
+
 ```
 output/
 └── <파일명>/
@@ -105,6 +112,39 @@ output/
 `daily_summary_<timestamp>.csv`도 생성됩니다. 하루 전체 파일의 보정파일, NDVI 평균·중앙값,
 식생 비율, 클래스 수, 클러스터 품질 및 처리 시간을 한 표에서 비교할 수 있습니다.
 
+### 팀·플랏 일일 통합 패키지
+
+배치 모드에서 **팀·플랏 일일 통합 리포트**를 켜고 실제 측정일과 팀 이름을 입력하면
+파일별 결과를 다시 계산하지 않고 다음 공유용 패키지를 만듭니다. 원본 CERES/BIL 큐브를
+다시 RAM에 올리지 않으므로 추가 메모리 부담은 작습니다.
+
+```text
+output/team_reports/<측정일>_<팀>_<생성시각>/
+├── Team_Report.html
+├── Field_Results.xlsx
+├── Field_Summary.csv
+├── Warnings.csv
+├── plots_overview.png
+├── plots_ndvi.png
+├── plot_ndvi_comparison.png
+├── Images/                  # 공유에 필요한 플랏별 이미지 복사본
+└── Details/                 # 플랏별 상세 HTML 복사본
+```
+
+- 모든 NDVI 타일은 동일한 `-1~1` 색상범위를 사용합니다.
+- 전체 픽셀을 섞지 않고 **각 플랏의 중앙값과 IQR**을 비교합니다.
+- 팀 통계에는 `value_units=reflectance`, `calibration_qc_status=PASS`, NDVI 계산 가능 조건을
+  모두 만족한 플랏만 포함됩니다. `REVIEW`, `FAIL`, 미보정 파일은 `Warnings`로 분리됩니다.
+- `Field_Results.xlsx`에는 Dashboard, README, Field Summary, Cluster Summary,
+  Reflectance Spectra, Warnings 시트가 생성됩니다.
+
+파일명이 플랏 ID가 아닌 경우 선택형 메타데이터 CSV를 사용합니다:
+
+```csv
+filename,plot_id,treatment,genotype,replicate,team,measurement_date
+scene_001.bil,AP3-4,Control,WT,1,Team A,2026-08-27
+```
+
 ### 선택형 결과 리포트
 
 - **빠른 필드 QC**: RGB, NDVI, 클러스터 맵·오버레이, 평균·중앙값 스펙트럼,
@@ -119,7 +159,20 @@ output/
 
 출력 파일명에 방법 이름이 포함되므로 같은 폴더에 여러 방법의 결과를 함께 저장해도 덮어쓰기가 발생하지 않습니다.
 
-`spectra_{method}.csv` 파일은 **클래스별·밴드별 7개 통계값**을 포함합니다:
+결과 표는 현재 `.xlsx` 통합문서가 아니라 **Excel에서 바로 열 수 있는 UTF-8 CSV**입니다.
+스펙트럼 CSV는 한 행이 한 파장이고, 파일명 접미사에 따라 값의 의미가 달라집니다.
+
+| 파일 | 의미 |
+|------|------|
+| `spectra_{method}_reflectance.csv` | 유효한 보정이 적용된 과학 분석용 반사율 |
+| `spectra_{method}_raw_dn.csv` | 보정 전 센서 DN; 보정 전후 비교와 오류 진단용 |
+| `spectra_{method}_processed.csv` | 보정이 없을 때 정규화/전처리된 상대값; 절대 반사율이 아님 |
+| `spectra_{method}.csv` | 현재 실행에서 추출된 대표 파일; 정확한 단위는 `value_units` 열로 확인 |
+| `daily_summary_*.csv` | 배치 파일별 NDVI, 식생 비율, 클래스 수, 품질지표와 처리시간 |
+| `all_roi_cluster_spectra*.csv` | 모든 ROI·클러스터 스펙트럼을 합친 표 |
+| `cluster_summary.csv` | ROI별 클러스터 픽셀 수와 면적 비율(`fraction`, 0–1) |
+
+각 스펙트럼 파일은 **클래스별·밴드별 7개 통계값**을 포함합니다:
 
 | 열 접미사 | 설명 |
 |-----------|------|
@@ -130,6 +183,9 @@ output/
 | `mna` | **Medoid-Neighbourhood Average** — 클래스 중앙값에 유클리드 거리가 가장 가까운 100개 픽셀의 평균. 이상치를 제거하면서 실제 픽셀만 평균. |
 | `sam_avg` | **SAM-Neighbourhood Average** — 중앙값에 스펙트럼 각도가 가장 작은 100개 픽셀의 평균. 조명 불변; Vcmax · 생화학 특성 매칭에 권장. |
 
+단, ROI의 `cluster_spectra*` 파일은 비교·병합하기 쉬운 long 형식으로
+`ROI × 클러스터 × 파장`마다 한 행을 사용하며 `mean`, `median`, `std`, `q25`, `q75`를 저장합니다.
+
 열 이름은 `{파일명}_{방법}_{클래스}_{통계}` 형식(예: `AP3-4_kmeans_Sunlit_Leaves_sam_avg`)이므로 여러 파일·방법의 CSV를 합쳐도 열 충돌이 없습니다. `mna`·`sam_avg`에 사용하는 이웃 수(기본값 100)는 `config.yaml`의 `extraction.n_neighbors`에서 변경할 수 있습니다.
 
 각 스펙트럼 CSV 앞부분에는 `value_units`, `calibration_applied`,
@@ -137,6 +193,9 @@ output/
 `normalization_mode`가 함께 기록됩니다. 보정 반사율 CSV에는 각 파장의 경험선 계수
 `calibration_a`, `calibration_b`도 저장됩니다. raw-DN 파일은
 `calibration_applied=false`이지만 대응되는 보정파일을 `paired_calibration_profile`에 남깁니다.
+논문용 반사율은 `_reflectance.csv`에서 `value_units=reflectance`,
+`calibration_applied=true`, `calibration_qc_status=PASS`를 우선 확인합니다. `REVIEW`는
+점프·포화 경고를 검토한 뒤 사용하고 `FAIL`은 사용하지 않습니다.
 
 `.html` 파일을 브라우저에서 열면 다음 내용을 확인할 수 있습니다:
 - RGB / CIR 합성 이미지
@@ -146,6 +205,9 @@ output/
 - 클러스터 품질 지표 (Silhouette, Davies-Bouldin) + 색상 코딩 해석 박스
 - 식생 분리도 평가 (NDVI 기반 Recall / Precision / F1) + 개선 안내
 - **파일별 처리 시간**
+
+리포트의 RGB, 클러스터 맵, 오버레이, 클러스터별 이미지는 넓은 화면에서도 2열로 크게
+표시됩니다. 이미지를 클릭하면 화면에 맞춰 확대되며 바깥쪽, 닫기 버튼 또는 `Esc`로 닫습니다.
 
 ---
 
@@ -214,8 +276,9 @@ GUI의 **패널 보정** 탭에서 다음 순서만 수행합니다.
 기록합니다. 빠른 선별·리포트에는 사용할 수 있지만, 논문용 최종 정량 결과에는 같은 센서 설정의
 실측 Dark를 권장합니다.
 
-보정계수는 `output/calibration/`에 자동 저장되고 **분석 실행**과 **ROI 스펙트럼**에 자동
-연결됩니다. 추가 정규화는 꺼져 계산된 반사율을 유지합니다. **현재 영상 반사율 BIL 만들기**를
+보정계수는 `output/calibration/`에 자동 저장됩니다. QC PASS/REVIEW만 **분석 실행**과
+**ROI 스펙트럼**에 연결되고 FAIL은 자동 적용이 차단됩니다. 연결된 경우 추가 정규화는 꺼져
+계산된 반사율을 유지합니다. **현재 영상 반사율 BIL 만들기**를
 누르면 `output/reflectance/`에 float32 BIL/HDR 및 보정 이력 JSON이 저장됩니다.
 
 앱을 다시 시작해도 분석할 영상과 같은 이름의 보정파일을 원본 폴더 및
@@ -229,6 +292,35 @@ CSV는 자동으로 바뀌지 않으므로, `processing_manifest.json`의 `calib
 ---
 
 ## 8. 사용 팁
+
+### CERES 컨테이너를 바로 확인하는 방법
+
+1. **로컬 폴더 → 단일 파일 선택 → 폴더 스캔**에서 `.ceres` 파일을 고릅니다.
+2. **CERES 내부 목록 읽기**를 누르면 픽셀 전체를 읽지 않고 레코드 헤더만 검사하여
+   `A/VNIR`, `A/SWIR`, `B/VNIR` 같은 실제 촬영 항목을 표시합니다. 같은 파일은 인덱스를
+   캐시하므로 다음에는 즉시 열립니다. 2024 CBDF v1과 신규 CBDF v2를 모두 인식합니다.
+3. 항목을 하나 고르고 **빠른 미리보기**를 누릅니다. VNIR은 가시광 RGB, SWIR은 가색 3개 밴드만 직접 읽어
+   전체 CERES나 전체 초분광 큐브를 RAM에 올리지 않습니다.
+4. 분석할 항목이 맞으면 **선택 항목 분석 준비**를 누릅니다. 선택한 센서/구간만
+   `output/_ceres_cache`의 uint16 BIL/HDR로 만들고 일반 분석 입력에 연결합니다.
+5. 표시된 메모리 예상표를 보고 공간 다운샘플링을 선택한 뒤 분석을 시작합니다.
+
+현재 단계는 안전한 **탐색·선택·선택 구간 변환**까지 지원합니다. CERES 하루 폴더를 BIL 없이
+완전 자동 처리하려면 표본 기반 클러스터 모델 학습 후 레코드를 두 번 스트리밍하는 방식이
+필요하며, 이는 다음 단계입니다. 현재 배치 분석은 준비된 BIL/HDR을 대상으로 실행하세요.
+
+### 보정 QC와 클러스터링 입력
+
+- 새 보정파일은 생성 즉시 `PASS`, `REVIEW`, `FAIL`로 점검됩니다. 패널 복원 오차,
+  ROI 균일도, 패널 간 계수 차이, 인접 파장 계단, 패널 가중치 급변을 함께 검사합니다.
+- `FAIL` 파일은 감사용으로 저장되지만 전체 분석에 자동 연결되지 않습니다.
+- 합성 상수 Dark를 사용한 결과는 측정 Dark가 아니므로 최소 `REVIEW`입니다.
+- 기본 K-Means 클러스터링은 원본 DN의 스펙트럼 구조로 수행하고, 같은 클러스터 마스크를
+  보정된 큐브에 적용해 반사율 스펙트럼과 지수를 저장합니다. Hybrid만 보정파일이 있으면
+  NDVI·밝기 임계값 때문에 반사율을 클러스터 입력으로 자동 사용합니다.
+- 분석 완료 후 **클러스터링 결과 이미지 검수**에서 분석 RGB, 클러스터 컬러맵,
+  RGB 오버레이를 한 화면에서 비교할 수 있습니다. 표시할 클러스터, 색상 투명도와 경계선을
+  조절하고 **클러스터별 단독 이미지**로 잎·그림자·과반사·토양 분리를 확인합니다.
 
 - **Windows 경로 선택** — 데이터 폴더, 결과 폴더, ROI/패널/Dark 파일 옆의 `🪟 선택`을
   누르면 Windows 탐색기 창에서 경로를 고를 수 있습니다. 파일은 웹으로 업로드되지 않고

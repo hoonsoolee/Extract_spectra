@@ -13,10 +13,8 @@ from __future__ import annotations
 import html
 import importlib
 import json
-import os
 import re
 import copy
-import subprocess
 import sys
 import time
 import traceback
@@ -58,6 +56,7 @@ summarize_result_labels_on_data = _roi_clustering_module.summarize_result_labels
 summarize_region_from_class_map = _roi_clustering_module.summarize_region_from_class_map
 from src.roi_utils import box_region, display_rgb, polygon_region, selection_to_region
 from src.calibration_provenance import add_calibration_provenance
+from src.local_open import open_local_path as _open_local_path
 from streamlit_image_coordinates import streamlit_image_coordinates
 from src.path_picker import (
     choose_directory as _choose_directory,
@@ -105,8 +104,15 @@ st.markdown(
 )
 with st.sidebar:
     st.markdown("### 🧭 분석 화면")
-    st.page_link("app.py", label="🌿 전체 필드 자동 분석")
-    st.page_link("pages/2_구역별_클러스터링.py", label="🗺️ ROI 구역 분석·재클러스터링")
+    if Path(__file__).name == "app_roi_clustering.py":
+        st.caption("🗺️ ROI 구역 분석·재클러스터링 · 단독 실행")
+        st.caption("전체 필드 화면은 `streamlit run app.py`로 실행합니다.")
+    else:
+        st.page_link("app.py", label="🌿 전체 필드 자동 분석")
+        st.page_link(
+            "pages/2_구역별_클러스터링.py",
+            label="🗺️ ROI 구역 분석·재클러스터링",
+        )
     st.divider()
 
 
@@ -158,6 +164,7 @@ def _shared_config(
         },
         "classification": {
             "method": method,
+            "input_space": "auto",
             "classes": [],
             "kmeans": {"n_clusters": count, "pca_components": 15, "n_init": 10,
                        "max_iter": 300, "random_state": 42},
@@ -214,6 +221,36 @@ def _prepare_shared_data(
         else "normalized (per-band)"
     )
     return processed, processed_wl, units, calibration_info
+
+
+def _prepare_clustering_data(
+    raw_data: np.ndarray,
+    raw_wavelengths: list[float] | None,
+    config: dict,
+    processed: np.ndarray,
+    processed_wavelengths: list[float] | None,
+    calibration_info: dict | None,
+    source_path: str = "",
+) -> tuple[np.ndarray, list[float] | None, str]:
+    """Use raw spectral structure by default; keep Hybrid thresholds physical."""
+    method = str(config.get("classification", {}).get("method", "kmeans")).lower()
+    if method == "hybrid" and calibration_info is not None:
+        return processed, processed_wavelengths, "reflectance"
+    cluster_config = copy.deepcopy(config)
+    preprocessing = cluster_config.setdefault("preprocessing", {})
+    preprocessing["calibration_file"] = None
+    preprocessing["auto_discover_calibration"] = False
+    preprocessing["normalize"] = True
+    preprocessing["normalize_mode"] = "global"
+    preprocessing["spatial_downsample"] = 1
+    cluster_preprocessor = Preprocessor(cluster_config)
+    cluster_data, cluster_wavelengths = cluster_preprocessor.process(
+        np.asarray(raw_data, dtype=np.float32),
+        raw_wavelengths,
+        skip_downsample=True,
+        source_path=source_path or None,
+    )
+    return cluster_data, cluster_wavelengths, "raw DN (global scale)"
 
 
 def _state_defaults() -> None:
@@ -614,18 +651,27 @@ def _run_roi_trial(
         global_settings.get("cnn_epochs", 100),
         settings["hdbscan_min_cluster_size"], settings["hdbscan_min_samples"],
     )
-    processed, processed_wl, value_units, _ = _prepare_shared_data(
+    processed, processed_wl, value_units, calibration_info = _prepare_shared_data(
         data, wavelengths, cfg, global_settings.get("calibration_path", ""),
+        global_settings.get("source_file", ""),
+    )
+    cluster_data, cluster_wl, _ = _prepare_clustering_data(
+        data,
+        wavelengths,
+        cfg,
+        processed,
+        processed_wl,
+        calibration_info,
         global_settings.get("source_file", ""),
     )
     local_mask, bounds = region_local_mask(
         item["region"], processed.shape[0], processed.shape[1]
     )
     r0, r1, c0, c1 = bounds
-    selected_pixels = processed[r0:r1, c0:c1, :][local_mask]
-    compact = selected_pixels.reshape(-1, 1, processed.shape[2])
+    selected_pixels = cluster_data[r0:r1, c0:c1, :][local_mask]
+    compact = selected_pixels.reshape(-1, 1, cluster_data.shape[2])
     local_classifier = HyperspectralClassifier(cfg)
-    local_map_compact, _ = local_classifier.classify(compact, processed_wl, None)
+    local_map_compact, _ = local_classifier.classify(compact, cluster_wl, None)
     class_map = np.full(processed.shape[:2], -1, dtype=np.int32)
     local_target = class_map[r0:r1, c0:c1]
     local_target[local_mask] = local_map_compact.reshape(-1)
@@ -635,7 +681,7 @@ def _run_roi_trial(
         method=settings["method"], source_scope="roi_recluster",
         value_units=value_units,
     )
-    return result, _quality_metrics(processed, result)
+    return result, _quality_metrics(cluster_data, result)
 
 
 def _render_result(
@@ -711,12 +757,7 @@ def _open_output_folder(folder: Path) -> None:
     resolved = folder.expanduser().resolve()
     if not resolved.is_dir():
         raise FileNotFoundError(f"결과 폴더가 없습니다: {resolved}")
-    if os.name == "nt":
-        os.startfile(str(resolved))  # type: ignore[attr-defined]
-    elif sys.platform == "darwin":
-        subprocess.Popen(["open", str(resolved)])
-    else:
-        subprocess.Popen(["xdg-open", str(resolved)])
+    _open_local_path(resolved)
 
 
 def _spectra_figure(result: ROIClusterResult) -> go.Figure:
@@ -970,15 +1011,40 @@ def _save_report(
     )
     report = f"""<!doctype html><html lang="ko"><head><meta charset="utf-8">
     <title>구역별 초분광 클러스터링</title><style>
-    body{{font-family:Arial,sans-serif;max-width:1500px;margin:28px auto;padding:0 24px;color:#24322b}}
+    body{{font-family:Arial,sans-serif;max-width:1800px;margin:28px auto;padding:0 24px;color:#24322b}}
     h1{{color:#176b43}} section{{border-top:1px solid #ccd8d1;margin-top:30px;padding-top:12px}}
-    .grid{{display:grid;grid-template-columns:1fr 1fr;gap:18px}}
-    .class-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}}
-    img{{max-width:100%;border:1px solid #ddd}}
-    figcaption{{color:#5d6d64;font-size:13px}} @media(max-width:900px){{.grid{{grid-template-columns:1fr}}}}
+    .grid,.class-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px}}
+    img{{width:100%;max-width:100%;height:auto;border:1px solid #ddd;cursor:zoom-in}}
+    figcaption{{color:#5d6d64;font-size:13px}}
+    .image-modal{{display:none;position:fixed;z-index:9999;inset:0;padding:24px;background:rgba(0,0,0,.88);
+      align-items:center;justify-content:center;flex-direction:column}}
+    .image-modal img{{width:auto;max-width:96vw;max-height:88vh;object-fit:contain;background:#fff}}
+    .image-modal button{{position:fixed;top:12px;right:22px;border:0;background:transparent;color:#fff;
+      font-size:42px;cursor:pointer}}
+    .image-modal-caption{{color:#fff;margin-top:10px;font-size:14px}}
+    @media(max-width:1050px){{.grid,.class-grid{{grid-template-columns:1fr}}body{{padding:0 12px}}}}
     </style></head><body><h1>구역별 초분광 클러스터링 리포트</h1>
     <p><b>Source:</b> {html.escape(str(source_file))}<br><b>Created:</b> {html.escape(manifest['created_at'])}</p>
-    {global_section}{''.join(sections)}</body></html>"""
+    {global_section}{''.join(sections)}
+    <div id="image-modal" class="image-modal" role="dialog" aria-modal="true" aria-label="이미지 확대">
+      <button type="button" aria-label="닫기">&times;</button><img id="modal-image" alt="">
+      <div id="modal-caption" class="image-modal-caption"></div>
+    </div>
+    <script>(function(){{
+      const modal=document.getElementById('image-modal');
+      const modalImage=document.getElementById('modal-image');
+      const caption=document.getElementById('modal-caption');
+      function closeImage(){{modal.style.display='none';document.body.style.overflow='';}}
+      document.querySelectorAll('figure img').forEach(function(img){{
+        img.title='클릭하여 크게 보기';
+        img.addEventListener('click',function(){{modalImage.src=img.src;modalImage.alt=img.alt||'';
+          caption.textContent=img.alt||'';modal.style.display='flex';document.body.style.overflow='hidden';}});
+      }});
+      modal.addEventListener('click',function(event){{
+        if(event.target===modal||event.target.tagName==='BUTTON')closeImage();
+      }});
+      document.addEventListener('keydown',function(event){{if(event.key==='Escape')closeImage();}});
+    }})();</script></body></html>"""
     (run_dir / "report.html").write_text(report, encoding="utf-8")
     return run_dir / "report.html"
 
@@ -1113,7 +1179,17 @@ with st.sidebar:
         "분류 방법 — 기존 분석과 동일",
         options=list(METHODS),
         format_func=lambda x: METHODS[x],
+        index=list(METHODS).index("kmeans"),
     )
+    if method == "hybrid":
+        st.caption(
+            "클러스터링 입력: 보정파일이 있으면 반사율, 없으면 전역 배율 DN."
+        )
+    else:
+        st.caption(
+            "클러스터링은 원본 DN 구조로 하고, 같은 마스크에서 보정 반사율 "
+            "스펙트럼을 추출합니다."
+        )
     if method in {"supervised", "hdbscan"}:
         n_classes = 0
         st.caption("클래스 수는 라벨 또는 알고리즘이 자동으로 결정합니다.")
@@ -1600,10 +1676,19 @@ with tab_run:
                     data, wavelengths, cfg, calibration_path,
                     st.session_state["rc_file"],
                 )
+                cluster_data, cluster_wl, cluster_input = _prepare_clustering_data(
+                    data,
+                    wavelengths,
+                    cfg,
+                    processed,
+                    processed_wl,
+                    calibration_info,
+                    st.session_state["rc_file"],
+                )
                 progress.progress(0.25, text=f"{METHODS[method]} 전체 이미지 분석 중")
                 classifier = HyperspectralClassifier(cfg)
                 class_map, class_info = classifier.classify(
-                    processed, processed_wl, labels_csv.strip() or None
+                    cluster_data, cluster_wl, labels_csv.strip() or None
                 )
                 st.session_state["rc_global_result"] = {
                     "method": method,
@@ -1612,6 +1697,7 @@ with tab_run:
                     "hybrid_base_map": classifier.last_base_class_map,
                 }
                 global_settings["selected_calibration"] = calibration_info
+                global_settings["clustering_input"] = cluster_input
                 global_settings["effective_normalization"] = (
                     (calibration_info or {}).get(
                         "effective_normalization", normalize_mode
@@ -1643,7 +1729,7 @@ with tab_run:
                         )
                     results.append(baseline)
                     baselines[item["id"]] = baseline
-                    baseline_metrics[item["id"]] = _quality_metrics(processed, baseline)
+                    baseline_metrics[item["id"]] = _quality_metrics(cluster_data, baseline)
                 st.session_state["rc_results"] = results
                 st.session_state["rc_global_settings"] = global_settings
                 st.session_state["rc_roi_baselines"] = baselines
@@ -2137,12 +2223,29 @@ with tab_results:
         if st.session_state.get("rc_last_report"):
             report_path = Path(st.session_state["rc_last_report"])
             st.code(str(report_path))
-            if st.button("📂 결과 폴더 열기", width="stretch"):
-                try:
-                    _open_output_folder(report_path.parent)
-                    st.success(f"파일 탐색기에서 열었습니다: {report_path.parent}")
-                except Exception as exc:
-                    st.error(f"결과 폴더를 열지 못했습니다: {exc}")
+            _report_open_col, _folder_open_col, _report_download_col = st.columns(3)
+            with _report_open_col:
+                if st.button("🌐 HTML 리포트 열기", width="stretch"):
+                    try:
+                        _open_local_path(report_path)
+                        st.success("기본 웹브라우저에서 리포트를 열었습니다.")
+                    except Exception as exc:
+                        st.error(f"HTML 리포트를 열지 못했습니다: {exc}")
+            with _folder_open_col:
+                if st.button("📂 결과 폴더 열기", width="stretch"):
+                    try:
+                        _open_output_folder(report_path.parent)
+                        st.success(f"파일 탐색기에서 열었습니다: {report_path.parent}")
+                    except Exception as exc:
+                        st.error(f"결과 폴더를 열지 못했습니다: {exc}")
+            with _report_download_col:
+                st.download_button(
+                    "⬇️ HTML 리포트 다운로드",
+                    data=report_path.read_bytes(),
+                    file_name=report_path.name,
+                    mime="text/html",
+                    width="stretch",
+                )
 
 with tab_export:
     st.markdown("### Science-ready 보정·Binning BIL 생성")

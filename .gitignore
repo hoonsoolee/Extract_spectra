@@ -16,6 +16,7 @@ env/
 
 # Pipeline outputs (generated files)
 output/
+outputs/
 output_fixed/
 roi_cluster_output/
 cache/

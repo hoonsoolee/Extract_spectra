@@ -204,13 +204,22 @@ def panel_saturation_metrics(
     # panel out while it approaches the non-linear end of the sensor range,
     # then give fully clipped bands zero weight.  A lower-reflectance panel can
     # therefore carry the common calibration model smoothly through the region.
-    peak_ratio = band_max / ceiling
+    # Use a robust upper quantile for the gradual headroom fade. The absolute
+    # maximum is retained for audit, but a single hot pixel must not switch an
+    # otherwise valid panel off for an entire wavelength. True clipping is
+    # still rejected by ``saturated_mask`` using the configured pixel fraction
+    # and plateau tests above.
+    headroom_quantile = 1.0 - float(np.clip(band_fraction_limit, 1e-4, 0.25))
+    band_headroom = np.nanquantile(array, headroom_quantile, axis=0)
+    headroom_ratio = band_headroom / ceiling
     fade_start = min(0.85, float(saturation_level) - 0.01)
     fade_end = max(fade_start + 1e-6, float(saturation_level))
-    headroom = np.clip((fade_end - peak_ratio) / (fade_end - fade_start), 0.0, 1.0)
+    headroom = np.clip(
+        (fade_end - headroom_ratio) / (fade_end - fade_start), 0.0, 1.0
+    )
     # Smoothstep avoids a kink at both ends of the transition.
     headroom = headroom * headroom * (3.0 - 2.0 * headroom)
-    headroom[saturated_mask | ~np.isfinite(band_max)] = 0.0
+    headroom[saturated_mask | ~np.isfinite(band_headroom)] = 0.0
     return {
         "usable": len(saturated) == 0,
         "adc_ceiling": ceiling,
@@ -225,7 +234,10 @@ def panel_saturation_metrics(
         "usable_band_mask": (~saturated_mask).astype(bool).tolist(),
         "headroom_weight_by_band": headroom.astype(float).tolist(),
         "band_max_dn": band_max.astype(float).tolist(),
-        "band_peak_ratio": peak_ratio.astype(float).tolist(),
+        "band_peak_ratio": (band_max / ceiling).astype(float).tolist(),
+        "band_headroom_dn": band_headroom.astype(float).tolist(),
+        "band_headroom_ratio": headroom_ratio.astype(float).tolist(),
+        "headroom_quantile": float(headroom_quantile),
         "reason": (
             "usable" if len(saturated) == 0
             else f"{len(saturated)} band(s) exceeded the saturation limit"
@@ -387,6 +399,197 @@ def weighted_dark_panel_calibration(
         ),
     }
     return a.astype(np.float32), b.astype(np.float32), qc
+
+
+def evaluate_weighted_calibration(
+    panel_dns: Sequence[np.ndarray],
+    panel_reflectances: Sequence[float | np.ndarray],
+    dark_dn: np.ndarray,
+    a: np.ndarray,
+    b: np.ndarray,
+    *,
+    fit_quality: Optional[dict] = None,
+    panel_usable_masks: Optional[Sequence[np.ndarray]] = None,
+    panel_uniformities: Optional[Sequence[float]] = None,
+    dark_source_type: str = "unknown",
+    wavelengths: Optional[Sequence[float]] = None,
+) -> dict:
+    """Grade a panel calibration as PASS, REVIEW, or FAIL.
+
+    This is a conservative screening check, not a replacement for a certified
+    panel spectrum or laboratory validation. It tests panel reconstruction,
+    seam-like adjacent-band jumps, coefficient agreement, and ROI uniformity.
+    A synthetic Dark cannot receive PASS because its offset was assumed.
+    """
+    observed = np.asarray(panel_dns, dtype=np.float64)
+    if observed.ndim != 2:
+        raise ValueError("panel_dns must have shape panels x bands")
+    n_panels, n_bands = observed.shape
+    if len(panel_reflectances) != n_panels:
+        raise ValueError("panel_reflectances must match panel_dns")
+    coeff_a = np.asarray(a, dtype=np.float64)
+    coeff_b = np.asarray(b, dtype=np.float64)
+    dark = np.asarray(dark_dn, dtype=np.float64)
+    if coeff_a.shape != (n_bands,) or coeff_b.shape != (n_bands,):
+        raise ValueError("Calibration coefficients must match panel bands")
+    if dark.shape != (n_bands,):
+        raise ValueError("Dark spectrum must match panel bands")
+
+    targets = np.empty_like(observed)
+    for index, value in enumerate(panel_reflectances):
+        reflectance = np.asarray(value, dtype=np.float64)
+        if reflectance.ndim == 0:
+            targets[index] = float(reflectance)
+        elif reflectance.shape == (n_bands,):
+            targets[index] = reflectance
+        else:
+            raise ValueError("Panel reflectance must be scalar or one value per band")
+
+    predictions = observed * coeff_a[None, :] + coeff_b[None, :]
+    residuals = predictions - targets
+    coefficient_valid = np.isfinite(coeff_a) & np.isfinite(coeff_b) & (coeff_a > 0)
+    usable = np.ones_like(observed, dtype=bool)
+    if panel_usable_masks is not None:
+        masks = np.asarray(panel_usable_masks, dtype=bool)
+        if masks.shape != observed.shape:
+            raise ValueError("panel_usable_masks must have shape panels x bands")
+        usable &= masks
+    usable &= np.isfinite(observed) & np.isfinite(targets)
+    usable &= (observed - dark[None, :]) > 0
+    usable &= coefficient_valid[None, :]
+
+    panel_metrics = []
+    max_mae = max_rmse = 0.0
+    max_residual_step = 0.0
+    residual_step_indices: set[int] = set()
+    for index in range(n_panels):
+        valid = usable[index]
+        absolute = np.abs(residuals[index, valid])
+        mae = float(np.mean(absolute)) if absolute.size else None
+        rmse = (
+            float(np.sqrt(np.mean(residuals[index, valid] ** 2)))
+            if absolute.size else None
+        )
+        if mae is not None:
+            max_mae = max(max_mae, mae)
+        if rmse is not None:
+            max_rmse = max(max_rmse, rmse)
+
+        pair_valid = valid[:-1] & valid[1:]
+        steps = np.abs(np.diff(residuals[index]))
+        flagged = np.flatnonzero(pair_valid & np.isfinite(steps) & (steps > 0.03))
+        if np.any(pair_valid):
+            max_residual_step = max(
+                max_residual_step, float(np.nanmax(steps[pair_valid]))
+            )
+        residual_step_indices.update(int(item + 1) for item in flagged)
+        panel_metrics.append({
+            "panel_index": int(index),
+            "usable_band_count": int(valid.sum()),
+            "mae": mae,
+            "rmse": rmse,
+            "median_prediction": (
+                float(np.nanmedian(predictions[index, valid])) if np.any(valid) else None
+            ),
+            "median_target": (
+                float(np.nanmedian(targets[index, valid])) if np.any(valid) else None
+            ),
+        })
+
+    fit_quality = fit_quality or {}
+    coefficient_cv = fit_quality.get("median_coefficient_cv")
+    coefficient_cv = (
+        float(coefficient_cv)
+        if coefficient_cv is not None and np.isfinite(coefficient_cv)
+        else None
+    )
+    weights = np.asarray(fit_quality.get("panel_weights", []), dtype=np.float64)
+    max_weight_step = 0.0
+    weight_step_indices: set[int] = set()
+    if weights.shape == observed.shape and n_bands > 1:
+        weight_steps = np.abs(np.diff(weights, axis=1))
+        max_weight_step = float(np.nanmax(weight_steps)) if weight_steps.size else 0.0
+        for item in np.argwhere(weight_steps > 0.35):
+            weight_step_indices.add(int(item[1] + 1))
+
+    uniformities = [
+        float(value) for value in (panel_uniformities or [])
+        if value is not None and np.isfinite(value)
+    ]
+    max_uniformity = max(uniformities, default=0.0)
+    invalid_fraction = float(1.0 - coefficient_valid.mean())
+
+    severe_reasons: list[str] = []
+    review_reasons: list[str] = []
+    if invalid_fraction > 0.20:
+        severe_reasons.append("more than 20% of calibration bands are invalid")
+    elif invalid_fraction > 0.02:
+        review_reasons.append("more than 2% of calibration bands are invalid")
+    if max_uniformity > 0.20:
+        severe_reasons.append("a panel ROI is spatially non-uniform (CV > 0.20)")
+    elif max_uniformity > 0.10:
+        review_reasons.append("a panel ROI may include shadow/background (CV > 0.10)")
+    if max_mae > 0.08:
+        severe_reasons.append("reference-panel reconstruction MAE exceeds 0.08")
+    elif max_mae > 0.03:
+        review_reasons.append("reference-panel reconstruction MAE exceeds 0.03")
+    if coefficient_cv is not None:
+        if coefficient_cv > 0.15:
+            severe_reasons.append("panel-derived coefficients disagree strongly (CV > 0.15)")
+        elif coefficient_cv > 0.05:
+            review_reasons.append("panel-derived coefficients disagree (CV > 0.05)")
+    if max_residual_step > 0.08:
+        severe_reasons.append("a seam-like adjacent-band residual jump exceeds 0.08")
+    elif max_residual_step > 0.03:
+        review_reasons.append("an adjacent-band residual jump exceeds 0.03")
+    if max_weight_step > 0.75:
+        severe_reasons.append("panel weight changes abruptly between adjacent bands")
+    elif max_weight_step > 0.35:
+        review_reasons.append("panel weight transition needs review")
+    if n_panels < 2:
+        review_reasons.append("one panel cannot verify cross-panel agreement")
+    if str(dark_source_type).lower() == "synthetic_constant":
+        review_reasons.append("Dark was assumed from a constant DN instead of measured")
+
+    status = "FAIL" if severe_reasons else "REVIEW" if review_reasons else "PASS"
+    flagged_indices = sorted(residual_step_indices | weight_step_indices)
+    wavelength_values = None
+    if wavelengths is not None:
+        wl = np.asarray(wavelengths, dtype=np.float64)
+        if wl.shape == (n_bands,):
+            wavelength_values = [float(wl[index]) for index in flagged_indices]
+
+    return {
+        "status": status,
+        "auto_apply_allowed": status != "FAIL",
+        "severe_reasons": severe_reasons,
+        "review_reasons": review_reasons,
+        "panel_metrics": panel_metrics,
+        "invalid_band_fraction": invalid_fraction,
+        "max_panel_mae": float(max_mae),
+        "max_panel_rmse": float(max_rmse),
+        "max_panel_uniformity_cv": float(max_uniformity),
+        "median_coefficient_cv": coefficient_cv,
+        "max_adjacent_residual_step": float(max_residual_step),
+        "max_adjacent_weight_step": float(max_weight_step),
+        "flagged_band_indices": flagged_indices,
+        "flagged_wavelengths_nm": wavelength_values,
+    }
+
+
+def calibration_qc_status(meta: Optional[dict]) -> str:
+    """Return stored/legacy QC status without treating missing QC as PASS."""
+    values = dict(meta or {})
+    explicit = str(values.get("qc_status") or "").upper()
+    if explicit in {"PASS", "REVIEW", "FAIL"}:
+        return explicit
+    cv = values.get("median_coefficient_cv")
+    try:
+        if cv is not None and np.isfinite(float(cv)) and float(cv) > 0.15:
+            return "FAIL"
+    except (TypeError, ValueError):
+        pass
+    return "UNASSESSED"
 
 
 def constant_dark_reference(
@@ -1004,6 +1207,7 @@ def resolve_calibration(
     *,
     target_source: str | Path | None = None,
     wavelengths: Optional[Sequence[float]] = None,
+    allow_failed: bool = False,
 ) -> dict:
     """Resolve legacy coefficients or the time-nearest White/Dark profile."""
     root = Path(profile_or_directory).expanduser()
@@ -1045,6 +1249,14 @@ def resolve_calibration(
         resolved = _profile_coefficients(selected)
         resolved["meta"]["target_time"] = target_time.isoformat(timespec="seconds")
         resolved["meta"]["white_time_delta_seconds"] = float(delta_seconds)
+
+    status = calibration_qc_status(resolved.get("meta"))
+    resolved.setdefault("meta", {})["qc_status"] = status
+    if status == "FAIL" and not allow_failed:
+        raise ValueError(
+            "Calibration QC status is FAIL; automatic application is blocked. "
+            "Select cleaner panel ROIs and rebuild the calibration."
+        )
 
     cal_wl = resolved.get("wavelengths")
     if cal_wl is not None and wavelengths is not None:

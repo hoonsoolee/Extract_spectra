@@ -2,6 +2,10 @@
 
 ## 1. What the program produces
 
+After a run, the **Open Recent Analysis Results** panel can open the selected
+HTML report in the host's default browser, open its results folder, or download
+the report. Use the download action when running on a headless remote cluster.
+
 For each hyperspectral image, the workflow can:
 
 1. load an ENVI/GeoTIFF/HDF5/MAT cube without expanding the entire file unnecessarily;
@@ -45,19 +49,21 @@ or CUDA build appropriate for your workstation if those methods are needed.
 
 ## 3. Starting the web interface
 
-Full research workflow:
+Full Korean research workflow:
 
 ```bash
 python -m streamlit run app.py
 ```
 
-English core-analysis and pixel-labeling interface:
+Full English research workflow with the same CERES, ROI, panel-calibration,
+clustering, and reporting implementation:
 
 ```bash
 python -m streamlit run app_en.py
 ```
 
-Direct global-clustering/ROI interface:
+From the English app, use **ROI Analysis & Re-clustering** in the navigation
+sidebar. The following standalone command opens the Korean developer entry:
 
 ```bash
 python -m streamlit run app_roi_clustering.py
@@ -65,9 +71,9 @@ python -m streamlit run app_roi_clustering.py
 
 The application normally opens at `http://localhost:8501`.
 
-The full calibration and ROI workflow currently lives in `app.py` and
-`app_roi_clustering.py`; some interface labels in these two research screens
-are Korean. This guide gives the matching English sequence and button meaning.
+`app.py` and `app_en.py` execute one shared implementation. The English entry
+translates presentation text only; processing options and scientific outputs
+are identical in both languages.
 
 ## 4. Supported inputs
 
@@ -77,6 +83,7 @@ are Korean. This guide gives the matching English sequence and button meaning.
 | GeoTIFF | `.tif`, `.tiff` |
 | HDF5 | `.h5`, `.hdf5` |
 | MATLAB | `.mat` |
+| CERES/CBDF | `.ceres` (indexed in the web UI, then one selected sensor/segment is streamed to BIL) |
 
 For ENVI, keep the small header and binary data file together. Examples:
 
@@ -92,9 +99,9 @@ scene.bil
 scene.hdr
 ```
 
-Large Ceres acquisition files are not yet passed directly into the main web
-pipeline. Demultiplex them first with `ceres_demux.py`, then analyse the
-resulting ENVI file.
+Large Ceres acquisition files can be indexed and previewed in the web UI. The
+selected sensor/segment is then streamed to ENVI BIL for the existing analysis
+pipeline; the whole container is never expanded at once.
 
 ## 5. Recommended first run
 
@@ -138,6 +145,12 @@ saturation, its weight is reduced smoothly and a valid lower-reflectance panel
 can carry the same wavelength. Bands with no usable panel information remain
 invalid rather than being silently invented.
 
+The fitted profile is also graded `PASS`, `REVIEW`, or `FAIL` from panel
+reconstruction error, ROI uniformity, coefficient agreement, adjacent-band
+steps, and weight transitions. PASS/REVIEW may be connected to trial analysis;
+FAIL is saved for audit but is not automatically applied. A synthetic constant
+Dark receives at least REVIEW.
+
 Calibration profiles are normally saved to:
 
 ```text
@@ -145,9 +158,9 @@ output/calibration/<source>_weighted_dark_calibration.npz
 ```
 
 When a file is analysed, the source folder and `output/calibration` are searched
-for conservatively named candidates. Band count and wavelength compatibility
-are checked before automatic application. An explicit profile selected by the
-user takes priority.
+for conservatively named candidates. Band count, wavelength compatibility, and
+QC status are checked before automatic application. An explicit profile
+selected by the user takes priority, but FAIL remains blocked.
 
 When calibration is applied, additional scene normalization is automatically
 disabled so the physical reflectance scale is preserved.
@@ -204,16 +217,62 @@ wavelengths are available. Raw DN or missing bands produce an explicit
 write `daily_report_<timestamp>.html` and `daily_summary_<timestamp>.csv` with
 per-file calibration, NDVI, vegetation fraction, class count, quality, and time.
 
-`spectra_<method>.csv` contains the values actually used for clustering. When
-a profile was applied it is calibrated reflectance. The explicit
-`_reflectance.csv` and `_raw_dn.csv` files remove ambiguity for downstream
-analysis.
+### Team / plot daily package
+
+In batch mode, enable **Team / Plot Daily Package** and enter the actual
+acquisition date and team name. The aggregator reuses compact per-file outputs;
+it does not reopen the CERES/BIL cubes, so its additional memory cost is small.
+
+```text
+output/team_reports/<date>_<team>_<created>/
+├── Team_Report.html
+├── Field_Results.xlsx
+├── Field_Summary.csv
+├── Warnings.csv
+├── plots_overview.png
+├── plots_ndvi.png
+├── plot_ndvi_comparison.png
+├── Images/                  # copied plot images needed for sharing
+└── Details/                 # copied per-plot HTML reports
+```
+
+- Every NDVI tile uses the same fixed `-1 to 1` colour scale.
+- Plot medians and IQRs are compared; pixels from different plots are never pooled.
+- Team statistics include only plots with `value_units=reflectance`,
+  `calibration_qc_status=PASS`, and valid NDVI. REVIEW, FAIL, and uncalibrated
+  plots remain visible but are listed in Warnings and excluded from pooled values.
+- `Field_Results.xlsx` contains Dashboard, README, Field Summary, Cluster Summary,
+  Reflectance Spectra, and Warnings sheets.
+
+When filenames are not plot IDs, provide an optional metadata CSV:
+
+```csv
+filename,plot_id,treatment,genotype,replicate,team,measurement_date
+scene_001.bil,AP3-4,Control,WT,1,Team A,2026-08-27
+```
+
+The output tables are **UTF-8 CSV files that open directly in Excel**, rather
+than a single `.xlsx` workbook. Each spectral row represents one wavelength.
+
+| File | Meaning |
+|------|---------|
+| `spectra_<method>_reflectance.csv` | Science-ready reflectance when valid calibration was applied |
+| `spectra_<method>_raw_dn.csv` | Original sensor DN for diagnostics and before/after comparison |
+| `spectra_<method>_processed.csv` | Normalized/processed relative values when no calibration is available; not absolute reflectance |
+| `spectra_<method>.csv` | Main extraction from the current run; verify its scale in `value_units` |
+| `daily_summary_*.csv` | Per-file NDVI, vegetation fraction, class count, quality metrics, and elapsed time |
+| `all_roi_cluster_spectra*.csv` | Combined spectra for all ROIs and clusters |
+| `cluster_summary.csv` | Pixel count and area fraction (`fraction`, 0–1) for each ROI cluster |
 
 Each class contains:
 
 - mean, standard deviation, median, 25th and 75th percentiles;
 - Medoid-Neighbourhood Average (`mna`); and
 - SAM-Neighbourhood Average (`sam_avg`).
+
+ROI `cluster_spectra*` tables instead use long format with one row per
+ROI × cluster × wavelength and contain `mean`, `median`, `std`, `q25`, and
+`q75` for easier filtering and merging.
 
 Calibration-aware CSV files also contain:
 
@@ -232,7 +291,15 @@ For a science-ready reflectance table, verify:
 value_units = reflectance
 calibration_applied = true
 normalization_mode = none
+calibration_qc_status = PASS
 ```
+
+`REVIEW` results require inspection of jump/saturation warnings; avoid using
+`FAIL` results for scientific analysis.
+
+RGB, cluster-map, overlay, and isolated-cluster images are shown in a larger
+two-column report layout. Click any image for a full-window preview; click the
+background/close button or press `Esc` to close it.
 
 ## 8. Defining ROIs and extracting spectra
 
@@ -266,7 +333,8 @@ saturation, White/Dark selection, and the affected wavelengths.
 
 ## 9. One global clustering model, separate spectra per ROI
 
-Open the region-analysis screen from the navigation sidebar or run:
+Open **ROI Analysis & Re-clustering** from the English navigation sidebar. The
+standalone developer command below opens the Korean source page directly:
 
 ```bash
 python -m streamlit run app_roi_clustering.py
@@ -364,9 +432,42 @@ runs, retain a processing manifest beside every result.
 | Analysis is too slow or memory intensive | Start with spatial downsampling `4` or `8`, then reduce it for final processing. |
 | Old CSV lacks calibration columns | It predates the provenance update and must be regenerated. |
 
-## 14. Current scope
+## 14. Browsing a CERES container safely
 
-The implemented end product is the ENVI/BIL-based calibration, clustering,
-ROI-spectrum, re-clustering, and report pipeline. Direct day-folder Ceres
-ingestion and a configurable daily index-image package (for example, automatic
-NDVI image export for every acquisition) remain the next integration stage.
+1. Choose **Local Folder → Single File → Scan Folder**, then select a `.ceres` file.
+2. Click **Read CERES Contents**. Only record headers are scanned, producing logical
+   entries such as `A/VNIR`, `A/SWIR`, and `B/VNIR`. The index is cached. Both
+   the 2024 CBDF v1 and newer CBDF v2 layouts are recognized.
+3. Select one entry and click **Quick Preview**. VNIR uses visible RGB and SWIR
+   uses three false-color bands;
+   neither the full CERES file nor a full hyperspectral cube is loaded into RAM.
+4. Click **Prepare Selected Entry** only after confirming the acquisition. The software
+   streams that sensor/segment alone into a uint16 BIL/HDR cache under
+   `output/_ceres_cache` and connects it to the regular analysis pipeline.
+5. Review the displayed peak-RAM estimates and choose spatial downsampling before running.
+
+This release implements safe inspection, selection, preview, and selective extraction.
+Fully automatic day-folder processing without materializing BIL requires a later two-pass
+streaming workflow: sampled model fitting followed by chunked prediction and aggregation.
+
+## 15. Calibration QC and clustering input
+
+- New calibration profiles are graded `PASS`, `REVIEW`, or `FAIL` using panel
+  reconstruction error, ROI uniformity, cross-panel coefficient agreement, adjacent-band
+  seams, and abrupt panel-weight transitions.
+- A `FAIL` profile is saved for audit but is blocked from automatic application.
+- A synthetic constant Dark is explicitly recorded and receives at least `REVIEW`.
+- K-Means uses raw-DN spectral structure by default. Its masks are then applied to the
+  calibrated cube so both raw-DN and reflectance spectra are saved. Hybrid automatically
+  uses reflectance when a valid calibration exists because its NDVI and brightness
+  thresholds are defined on that scale.
+- After each run, **Visual Cluster Review** shows the analysis RGB, color map, and
+  adjustable overlay together. Select individual clusters, change opacity/boundaries,
+  and open isolated-class images to inspect leaf, shadow, glare, and soil separation.
+
+## 16. Current scope
+
+The implemented product includes ENVI/BIL calibration, clustering, ROI spectra,
+re-clustering, reporting, plus indexed CERES browsing and selective sensor/segment
+extraction. Direct streaming day-folder CERES analysis and a configurable daily
+index-image package remain the next integration stage.

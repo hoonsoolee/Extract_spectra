@@ -181,6 +181,15 @@ report:
   save_selected_images: true
   daily_summary: true
 
+  # Optional batch-level delivery package. The Streamlit app fills these fields
+  # from the Team/Plot Daily Package panel. Only calibration-QC PASS reflectance
+  # is included in pooled NDVI statistics.
+  team_daily:
+    enabled: false
+    team_name: "Field Team"
+    measurement_date: ""
+    metadata_csv: ""       # optional: filename,plot_id,treatment,genotype,replicate
+
   # RGB composite for visual reference
   show_rgb_composite: true
   rgb_red_nm: 660             # Wavelength (nm) mapped to red channel

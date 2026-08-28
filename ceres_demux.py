@@ -6,9 +6,9 @@ v2 변경: frame_no 갭 기준 세그먼트(A, B, C...) 자동 분할
 
 레코드 구조 (실측 확정):
   [CRC32 4B][payload_size u64 LE][type 6B][payload]
-  이미지 payload = [서브헤더 43B][픽셀 uint16 LE (bands, samples)]
-  서브헤더: 01 05 02 | frame_no u16 | 6B | ts_ns u64 | bands u64 | samples u64 | n_pix u64
-  타입: 040902001a00=VNIR, 030902001a00=SWIR, 020803000f00=GPS/IMU
+  2024/v1: [서브헤더 42B][픽셀], 05 02 | frame_no ...
+  2026/v2: [서브헤더 43B][픽셀], 01 05 02 | frame_no ...
+  타입: 040901/2=VNIR, 030901/2=SWIR, 020803000f00=GPS/IMU
 
 사용:
   python ceres_demux.py probe   FILE.ceres
@@ -22,10 +22,18 @@ import numpy as np
 
 GLOBAL_HEADER = 65536
 REC_HDR, SUBHDR = 18, 43
+# RIPE CERES files exist in at least two CBDF schema revisions.  Files from
+# 2024 use stream revision 01 and a 42-byte image subheader (05 02 ...), while
+# newer files use revision 02 and a 43-byte subheader (01 05 02 ...).
+TYPE_VNIR_V1 = bytes.fromhex('040901001a00')
+TYPE_SWIR_V1 = bytes.fromhex('030901001a00')
 TYPE_VNIR = bytes.fromhex('040902001a00')
 TYPE_SWIR = bytes.fromhex('030902001a00')
 TYPE_GPS  = bytes.fromhex('020803000f00')
-IMG_TYPES = {TYPE_VNIR: 'VNIR', TYPE_SWIR: 'SWIR'}
+IMG_TYPES = {
+    TYPE_VNIR_V1: 'VNIR', TYPE_SWIR_V1: 'SWIR',
+    TYPE_VNIR: 'VNIR', TYPE_SWIR: 'SWIR',
+}
 MAX_REC = 512 * 1024 * 1024
 
 
@@ -63,13 +71,19 @@ def walk_records(path):
 
 def parse_sub(f, off):
     f.seek(off + REC_HDR); sh = f.read(SUBHDR)
-    if len(sh) < SUBHDR or sh[:3] != b'\x01\x05\x02': return None
-    return {'frame_no': int.from_bytes(sh[3:5],'little'),
-            'ts_ns':    int.from_bytes(sh[11:19],'little'),
-            'bands':    int.from_bytes(sh[19:27],'little'),
-            'samples':  int.from_bytes(sh[27:35],'little'),
-            'n_pixels': int.from_bytes(sh[35:43],'little'),
-            'pix_off':  off + REC_HDR + SUBHDR}
+    if len(sh) >= 43 and sh[:3] == b'\x01\x05\x02':
+        prefix, subheader_bytes = 3, 43
+    elif len(sh) >= 42 and sh[:2] == b'\x05\x02':
+        prefix, subheader_bytes = 2, 42
+    else:
+        return None
+    return {'frame_no': int.from_bytes(sh[prefix:prefix+2], 'little'),
+            'ts_ns':    int.from_bytes(sh[prefix+8:prefix+16], 'little'),
+            'bands':    int.from_bytes(sh[prefix+16:prefix+24], 'little'),
+            'samples':  int.from_bytes(sh[prefix+24:prefix+32], 'little'),
+            'n_pixels': int.from_bytes(sh[prefix+32:prefix+40], 'little'),
+            'subheader_bytes': subheader_bytes,
+            'pix_off':  off + REC_HDR + subheader_bytes}
 
 
 def collect_frames(path):
@@ -79,8 +93,9 @@ def collect_frames(path):
             name = IMG_TYPES.get(typ)
             if name:
                 info = parse_sub(f, off)
-                if info and info['n_pixels']*2 == psize - SUBHDR:
-                    info['bytes'] = psize - SUBHDR
+                subheader_bytes = int(info.get('subheader_bytes', SUBHDR)) if info else SUBHDR
+                if info and info['n_pixels']*2 == psize - subheader_bytes:
+                    info['bytes'] = psize - subheader_bytes
                     frames[name].append(info); continue
             others[typ.hex()] = others.get(typ.hex(), 0) + 1
     for name in frames:

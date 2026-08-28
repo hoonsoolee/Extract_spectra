@@ -12,6 +12,7 @@ import importlib
 import re
 import sys
 import traceback
+import datetime
 from collections import Counter
 from pathlib import Path
 
@@ -38,6 +39,7 @@ from src.path_picker import (
     native_dialogs_available as _native_dialogs_available,
 )
 from src.report_options import REPORT_PRESETS
+from src.local_open import open_local_path as _open_local_path
 
 # ============================================================
 # Page config
@@ -75,7 +77,7 @@ class _ListLogHandler(logging.Handler):
         self.lines.append(self.format(record))
 
 
-_LOCAL_HSI_EXTS = {".hdr", ".tif", ".tiff", ".h5", ".hdf5", ".mat"}
+_LOCAL_HSI_EXTS = {".hdr", ".tif", ".tiff", ".h5", ".hdf5", ".mat", ".ceres"}
 _ROI_PLOTLY_CONFIG = {
     "scrollZoom": True,
     "displaylogo": False,
@@ -128,8 +130,8 @@ def _browse_file_into_state(
             title,
             st.session_state.get(target_key, ""),
             filetypes=(
-                ("초분광/ENVI", "*.hdr *.bil *.bip *.bsq *.raw *.img *.dat"),
-                ("보정/데이터", "*.npz *.h5 *.hdf5 *.mat *.tif *.tiff"),
+                ("초분광/ENVI/CERES", "*.hdr *.bil *.bip *.bsq *.raw *.img *.dat *.ceres"),
+                ("보정/데이터/메타데이터", "*.npz *.h5 *.hdf5 *.mat *.tif *.tiff *.csv"),
                 ("모든 파일", "*.*"),
             ),
         )
@@ -258,6 +260,142 @@ def _get_display_rgb(data: np.ndarray, wavelengths) -> np.ndarray:
     return (np.stack(channels, axis=2) * 255).astype(np.uint8)
 
 
+@st.cache_data(show_spinner=False)
+def _load_cluster_review(review_path: str, rgb_path: str, revision: int) -> dict:
+    """Load the compact class map and RGB used by the visual QC panel."""
+    from PIL import Image
+
+    del revision  # cache invalidation is carried by the file mtime value
+    with np.load(review_path, allow_pickle=False) as archive:
+        class_map = np.asarray(archive["class_map"], dtype=np.int32)
+        class_ids = np.asarray(archive["class_ids"], dtype=np.int32)
+        class_names = [str(value) for value in archive["class_names"]]
+        class_colors = np.asarray(archive["class_colors"], dtype=np.uint8)
+    with Image.open(rgb_path) as image:
+        rgb = np.asarray(image.convert("RGB"), dtype=np.uint8)
+    return {
+        "class_map": class_map,
+        "class_ids": class_ids,
+        "class_names": class_names,
+        "class_colors": class_colors,
+        "rgb": rgb,
+    }
+
+
+def _render_cluster_review(result_dir: Path, key_prefix: str) -> None:
+    """Render RGB, class map, adjustable overlay, and isolated classes."""
+    review_path = result_dir / "cluster_review.npz"
+    rgb_path = result_dir / "cluster_review_rgb.png"
+    if not review_path.is_file() or not rgb_path.is_file():
+        legacy = [
+            (result_dir / "rgb.png", "분석 RGB"),
+            (result_dir / "cluster_map.png", "클러스터 컬러맵"),
+            (result_dir / "cluster_overlay.png", "RGB + 클러스터 오버레이"),
+        ]
+        legacy = [(path, caption) for path, caption in legacy if path.is_file()]
+        if not legacy:
+            maps = sorted(result_dir.glob("class_map_*.png"))
+            legacy = [(path, "클러스터 컬러맵") for path in maps[:1]]
+        if legacy:
+            st.markdown(f"#### {result_dir.name}")
+            columns = st.columns(len(legacy))
+            for column, (path, caption) in zip(columns, legacy):
+                column.image(str(path), caption=caption, use_container_width=True)
+            st.caption(
+                "이 결과는 이전 형식입니다. 다시 분석하면 클러스터 선택·투명도·"
+                "단독 이미지 기능이 포함됩니다."
+            )
+        return
+    review = _load_cluster_review(
+        str(review_path.resolve()),
+        str(rgb_path.resolve()),
+        max(review_path.stat().st_mtime_ns, rgb_path.stat().st_mtime_ns),
+    )
+    class_map = review["class_map"]
+    class_ids = review["class_ids"]
+    class_names = review["class_names"]
+    class_colors = review["class_colors"]
+    rgb = review["rgb"]
+    labels = {
+        int(class_id): f"{name} · ID {int(class_id)}"
+        for class_id, name in zip(class_ids, class_names)
+    }
+
+    st.markdown(f"#### {result_dir.name}")
+    _ctl1, _ctl2, _ctl3 = st.columns([2.4, 1, 1])
+    with _ctl1:
+        selected_ids = st.multiselect(
+            "표시할 클러스터",
+            options=[int(value) for value in class_ids],
+            default=[int(value) for value in class_ids],
+            format_func=lambda value: labels.get(value, f"Cluster {value}"),
+            key=f"{key_prefix}_clusters",
+        )
+    with _ctl2:
+        opacity = st.slider(
+            "색상 투명도", 0.0, 1.0, 0.55, 0.05,
+            key=f"{key_prefix}_opacity",
+        )
+    with _ctl3:
+        show_boundaries = st.checkbox(
+            "경계선", value=True, key=f"{key_prefix}_boundaries"
+        )
+
+    color_map = np.zeros_like(rgb)
+    for class_id, color in zip(class_ids, class_colors):
+        color_map[class_map == int(class_id)] = color
+    selected_mask = np.isin(class_map, selected_ids)
+    overlay = rgb.astype(np.float32)
+    overlay[selected_mask] = (
+        (1.0 - opacity) * overlay[selected_mask]
+        + opacity * color_map[selected_mask].astype(np.float32)
+    )
+    overlay = np.clip(overlay, 0, 255).astype(np.uint8)
+    if show_boundaries:
+        boundary = np.zeros(class_map.shape, dtype=bool)
+        boundary[:, 1:] |= class_map[:, 1:] != class_map[:, :-1]
+        boundary[1:, :] |= class_map[1:, :] != class_map[:-1, :]
+        overlay[boundary & selected_mask] = 255
+
+    _img1, _img2, _img3 = st.columns(3)
+    _img1.image(rgb, caption="분석 RGB", use_container_width=True)
+    _img2.image(color_map, caption="클러스터 컬러맵", use_container_width=True)
+    _img3.image(
+        overlay,
+        caption="RGB + 선택 클러스터 오버레이",
+        use_container_width=True,
+    )
+
+    counts = [int(np.sum(class_map == int(value))) for value in class_ids]
+    st.dataframe(
+        pd.DataFrame({
+            "클러스터": [labels[int(value)] for value in class_ids],
+            "픽셀": counts,
+            "비율 (%)": [round(100 * count / max(1, class_map.size), 2) for count in counts],
+        }),
+        hide_index=True,
+        use_container_width=True,
+    )
+
+    with st.expander("클러스터별 단독 이미지", expanded=False):
+        gray = np.mean(rgb.astype(np.float32), axis=2, keepdims=True)
+        background = np.repeat(gray * 0.25, 3, axis=2).astype(np.uint8)
+        columns = st.columns(min(3, max(1, len(class_ids))))
+        for index, (class_id, color, name, count) in enumerate(
+            zip(class_ids, class_colors, class_names, counts)
+        ):
+            isolated = background.copy()
+            isolated[class_map == int(class_id)] = color
+            columns[index % len(columns)].image(
+                isolated,
+                caption=(
+                    f"{name} · {count:,} px "
+                    f"({100 * count / max(1, class_map.size):.1f}%)"
+                ),
+                use_container_width=True,
+            )
+
+
 def _build_label_figure(
     rgb: np.ndarray,
     lbl_rows: list,
@@ -380,6 +518,11 @@ def _do_load_file(path_str: str) -> tuple:
 
 if "run_scan_files" not in st.session_state:
     st.session_state["run_scan_files"] = []
+st.session_state.setdefault("ceres_index", None)
+st.session_state.setdefault("ceres_index_source", "")
+st.session_state.setdefault("ceres_preview", None)
+st.session_state.setdefault("ceres_preview_meta", None)
+st.session_state.setdefault("ceres_prepared", None)
 
 # ============================================================
 # Sidebar – Settings (pipeline run tab)
@@ -446,6 +589,8 @@ with st.sidebar:
     )
 
     _run_single_file = None
+    _selected_ceres_source = ""
+    _selected_ceres_entry = None
 
     if run_mode == "🔍 단일 파일 선택":
         if data_src == "로컬 폴더" and local_folder:
@@ -470,6 +615,173 @@ with st.sidebar:
                     key="run_file_select",
                 )
                 st.caption(f"📄 {Path(_run_single_file).name}")
+
+                if Path(_run_single_file).suffix.lower() == ".ceres":
+                    from src import ceres_reader as _ceres
+
+                    _selected_ceres_source = str(Path(_run_single_file).resolve())
+                    if st.session_state.get("ceres_index_source") != _selected_ceres_source:
+                        st.session_state["ceres_index"] = None
+                        st.session_state["ceres_index_source"] = _selected_ceres_source
+                        st.session_state["ceres_preview"] = None
+                        st.session_state["ceres_preview_meta"] = None
+                        st.session_state["ceres_prepared"] = None
+                        st.session_state.pop("ceres_entry_key", None)
+
+                    st.info(
+                        "CERES는 먼저 내부 촬영 구간을 읽고, 선택한 항목만 미리보기/"
+                        "분석용 BIL로 준비합니다. 전체 컨테이너를 RAM에 올리지 않습니다."
+                    )
+                    if st.button(
+                        "🧭 CERES 내부 목록 읽기",
+                        use_container_width=True,
+                        key="ceres_scan_btn",
+                    ):
+                        try:
+                            _cache_root = Path(
+                                st.session_state.get("output_dir_path", "./output")
+                            ).expanduser() / "_ceres_index"
+                            with st.spinner("CERES 레코드 헤더를 읽는 중..."):
+                                _index, _index_path, _reused = _ceres.load_or_build_index(
+                                    _selected_ceres_source, _cache_root
+                                )
+                            st.session_state["ceres_index"] = _index
+                            _entry_keys = [
+                                item["key"] for item in _index.get("entries", [])
+                            ]
+                            if _entry_keys:
+                                st.session_state["ceres_entry_key"] = _entry_keys[0]
+                            st.success(
+                                f"{len(_index['entries'])}개 항목 확인 · "
+                                + ("캐시 재사용" if _reused else "새 인덱스 저장")
+                            )
+                        except Exception:
+                            st.error("CERES 목록을 읽지 못했습니다.")
+                            st.code(traceback.format_exc(), language="python")
+
+                    _ceres_index = st.session_state.get("ceres_index")
+                    if _ceres_index:
+                        _ceres_entries = list(_ceres_index.get("entries") or [])
+                        if not _ceres_entries:
+                            st.warning(
+                                "VNIR/SWIR 영상 항목을 찾지 못했습니다. "
+                                "저장된 빈 인덱스는 다음 스캔에서 재사용하지 않습니다."
+                            )
+                            st.session_state["ceres_index"] = None
+                            _ceres_index = None
+
+                    if _ceres_index:
+                        with st.expander("내부 항목 전체 보기", expanded=False):
+                            st.dataframe(
+                                pd.DataFrame(_ceres.index_table(_ceres_entries)),
+                                hide_index=True,
+                                use_container_width=True,
+                            )
+                        _entry_keys = [item["key"] for item in _ceres_entries]
+                        if st.session_state.get("ceres_entry_key") not in _entry_keys:
+                            st.session_state["ceres_entry_key"] = _entry_keys[0]
+                        _entry_key = st.selectbox(
+                            "열어볼 촬영 구간 / 센서",
+                            _entry_keys,
+                            key="ceres_entry_key",
+                        )
+                        _selected_ceres_entry = _ceres.entry_by_key(
+                            _ceres_index, _entry_key
+                        )
+                        st.caption(
+                            f"{_selected_ceres_entry['lines']:,} lines × "
+                            f"{_selected_ceres_entry['samples']:,} samples × "
+                            f"{_selected_ceres_entry['bands']:,} bands · "
+                            f"선택 BIL {_selected_ceres_entry['bil_gib']:.2f} GiB"
+                        )
+                        _memory_rows = []
+                        for _factor in (1, 2, 4, 8):
+                            _estimate = _ceres.estimate_pipeline_memory_gib(
+                                _selected_ceres_entry, _factor
+                            )
+                            _memory_rows.append({
+                                "다운샘플": f"×{_factor}",
+                                "float32 큐브": f"{_estimate['float32_cube_gib']:.2f} GiB",
+                                "예상 피크 RAM": f"{_estimate['estimated_peak_gib']:.2f} GiB",
+                            })
+                        with st.expander("메모리 예상", expanded=False):
+                            st.dataframe(
+                                pd.DataFrame(_memory_rows),
+                                hide_index=True,
+                                use_container_width=True,
+                            )
+                            st.caption(
+                                "현재 PCA/K-means 파이프라인의 보수적 추정치입니다. "
+                                "원본 큐브 외에 반사율·float64·PCA 임시 배열을 포함합니다."
+                            )
+
+                        _cp1, _cp2 = st.columns(2)
+                        with _cp1:
+                            if st.button(
+                                "👁️ 빠른 미리보기",
+                                use_container_width=True,
+                                key="ceres_preview_btn",
+                            ):
+                                try:
+                                    with st.spinner("RGB 3개 밴드만 직접 읽는 중..."):
+                                        _preview, _preview_meta = _ceres.read_rgb_preview(
+                                            _selected_ceres_source,
+                                            _selected_ceres_entry,
+                                        )
+                                    st.session_state["ceres_preview"] = _preview
+                                    st.session_state["ceres_preview_meta"] = {
+                                        **_preview_meta,
+                                        "source": _selected_ceres_source,
+                                        "entry_key": _entry_key,
+                                    }
+                                except Exception:
+                                    st.error("CERES 미리보기를 만들지 못했습니다.")
+                                    st.code(traceback.format_exc(), language="python")
+                        with _cp2:
+                            if st.button(
+                                "📦 선택 항목 분석 준비",
+                                use_container_width=True,
+                                key="ceres_prepare_btn",
+                                help="선택한 센서/구간만 uint16 BIL로 캐시합니다.",
+                            ):
+                                try:
+                                    _demux_root = Path(
+                                        st.session_state.get("output_dir_path", "./output")
+                                    ).expanduser() / "_ceres_cache"
+                                    with st.spinner(
+                                        f"선택 항목 {_selected_ceres_entry['bil_gib']:.2f} GiB를 "
+                                        "분석용 BIL로 준비 중..."
+                                    ):
+                                        _prepared = _ceres.export_entry_to_bil(
+                                            _selected_ceres_source,
+                                            _selected_ceres_entry,
+                                            _demux_root,
+                                        )
+                                    st.session_state["ceres_prepared"] = {
+                                        **_prepared,
+                                        "source": _selected_ceres_source,
+                                        "entry_key": _entry_key,
+                                    }
+                                    st.success("선택 항목만 준비되었습니다.")
+                                except Exception:
+                                    st.error("분석용 BIL 준비에 실패했습니다.")
+                                    st.code(traceback.format_exc(), language="python")
+
+                        _prepared = st.session_state.get("ceres_prepared") or {}
+                        if (
+                            _prepared.get("source") == _selected_ceres_source
+                            and _prepared.get("entry_key") == _entry_key
+                            and Path(_prepared.get("hdr_path", "")).is_file()
+                        ):
+                            _run_single_file = _prepared["hdr_path"]
+                            st.success(
+                                "✅ 현재 선택 항목이 일반 BIL/HDR 분석 입력으로 연결됨"
+                            )
+                        else:
+                            _run_single_file = None
+                            st.caption(
+                                "분석 시작 전 ‘선택 항목 분석 준비’를 한 번 누르세요."
+                            )
             else:
                 st.caption("📂 스캔하여 파일을 선택하세요.")
         else:
@@ -488,6 +800,7 @@ with st.sidebar:
         "방법",
         list(METHODS.keys()),
         format_func=lambda k: METHODS[k]["label"],
+        index=list(METHODS.keys()).index("kmeans"),
         label_visibility="collapsed",
     )
 
@@ -499,6 +812,16 @@ with st.sidebar:
         f"{KIND_COLOR.get(kind, '')} {kind} "
         + ("| 🔥 PyTorch 필요" if needs_pytorch else "")
     )
+    if method == "hybrid":
+        st.caption(
+            "클러스터링 입력: 보정파일이 있으면 반사율, 없으면 전역 배율 DN. "
+            "Hybrid의 NDVI·밝기 임계값을 유지하기 위한 자동 선택입니다."
+        )
+    else:
+        st.caption(
+            "클러스터링 입력: 원본 DN의 스펙트럼 구조(기본). 같은 클러스터 마스크로 "
+            "보정 전 DN과 보정 후 반사율 스펙트럼을 모두 저장합니다."
+        )
 
     st.markdown("---")
 
@@ -772,6 +1095,70 @@ with st.sidebar:
                 "보정이 없거나 필요한 파장이 없으면 리포트에 계산 불가 이유를 기록합니다."
             )
 
+    with st.expander(
+        "👥 팀·플랏 일일 통합 리포트",
+        expanded=run_mode == "📦 전체 배치 처리",
+    ):
+        team_daily_enabled = st.checkbox(
+            "배치 완료 후 팀용 일일 패키지 생성",
+            value=True,
+            disabled=run_mode != "📦 전체 배치 처리",
+            key="team_daily_enabled",
+            help=(
+                "파일별 결과를 다시 읽어 하나의 HTML·Excel·NDVI 비교 이미지로 묶습니다. "
+                "원본 초분광 큐브를 다시 RAM에 올리지 않습니다."
+            ),
+        )
+        _default_team_name = (
+            Path(local_folder).name
+            if data_src == "로컬 폴더" and local_folder not in {"", ".", "./data"}
+            else "Field Team"
+        )
+        team_name = st.text_input(
+            "팀 이름",
+            value=_default_team_name,
+            key="team_daily_name",
+            disabled=not team_daily_enabled,
+        )
+        measurement_date = st.date_input(
+            "실제 측정일",
+            value=datetime.date.today(),
+            key="team_daily_date",
+            disabled=not team_daily_enabled,
+            help="분석 실행일이 아니라 현장에서 영상을 획득한 날짜를 선택하세요.",
+        )
+        _tm1, _tm2 = st.columns([4, 1])
+        with _tm1:
+            plot_metadata_csv = st.text_input(
+                "플랏 메타데이터 CSV (선택)",
+                value="",
+                placeholder="filename, plot_id, treatment, genotype, replicate",
+                key="team_daily_metadata_csv",
+                disabled=not team_daily_enabled,
+            )
+        with _tm2:
+            st.write("")
+            st.button(
+                "🪟 선택",
+                use_container_width=True,
+                key="browse_team_metadata_csv",
+                on_click=_browse_file_into_state,
+                args=("team_daily_metadata_csv", "플랏 메타데이터 CSV 선택"),
+                disabled=not team_daily_enabled or not _native_dialogs_available(),
+            )
+        st.caption(
+            "CSV가 없으면 파일명이 플랏 ID가 됩니다. CSV 열 예: "
+            "`filename, plot_id, treatment, genotype, replicate, team, measurement_date`."
+        )
+
+    team_daily_enabled = bool(
+        team_daily_enabled and run_mode == "📦 전체 배치 처리"
+    )
+    if team_daily_enabled:
+        report_sections["spectral_indices"] = True
+        if "NDVI" not in report_indices:
+            report_indices.append("NDVI")
+
     st.markdown("---")
 
     # ── Output / misc ────────────────────────────────────────
@@ -811,12 +1198,18 @@ with st.sidebar:
 # after one completed run.
 st.session_state.setdefault("run_timing_history", [])
 st.session_state.setdefault("run_last_timing", None)
+st.session_state.setdefault("run_last_reports", [])
+st.session_state.setdefault("run_last_output_dir", "")
+st.session_state.setdefault("run_last_review_dirs", [])
 _planned_run_files: list[str] = []
 if data_src == "로컬 폴더":
     if run_mode == "🔍 단일 파일 선택" and _run_single_file:
         _planned_run_files = [str(_run_single_file)]
     elif run_mode == "📦 전체 배치 처리" and local_folder:
-        _planned_run_files = list(_scan_local_hsi_files(local_folder))
+        _planned_run_files = [
+            path for path in _scan_local_hsi_files(local_folder)
+            if Path(path).suffix.lower() != ".ceres"
+        ]
         if file_limit:
             _planned_run_files = _planned_run_files[: int(file_limit)]
 
@@ -848,6 +1241,30 @@ tab_run, tab_roi, tab_panel, tab_label = st.tabs(
 # ============================================================
 
 with tab_run:
+    _ceres_preview_meta = st.session_state.get("ceres_preview_meta") or {}
+    if (
+        st.session_state.get("ceres_preview") is not None
+        and _ceres_preview_meta.get("source") == _selected_ceres_source
+    ):
+        st.markdown("### 👁️ CERES 선택 항목 미리보기")
+        st.image(
+            st.session_state["ceres_preview"],
+            caption=(
+                f"{Path(_selected_ceres_source).name} · "
+                f"{_ceres_preview_meta.get('entry_key')} · "
+                f"{_ceres_preview_meta.get('preview_mode', '미리보기')} · "
+                f"원본 {tuple(_ceres_preview_meta.get('source_shape', []))} → "
+                f"미리보기 {tuple(_ceres_preview_meta.get('preview_shape', []))}"
+            ),
+            use_container_width=True,
+        )
+        st.caption(
+            "VNIR은 가시광 RGB, SWIR은 1650/1250/1050 nm 가색을 사용합니다. "
+            "3개 밴드만 읽으므로 수 MB 수준이며, CERES 전체나 "
+            "전체 초분광 큐브를 RAM에 올리지 않습니다."
+        )
+        st.markdown("---")
+
     # ── Info cards ─────────────────────────────────────────────
     col_left, col_right = st.columns([3, 2])
 
@@ -909,6 +1326,14 @@ with tab_run:
             errors.append("반사도 보정 .npz 또는 프로파일 폴더를 찾을 수 없습니다.")
         if run_mode == "🔍 단일 파일 선택" and not _run_single_file:
             errors.append("단일 파일 모드: 폴더를 스캔하고 파일을 선택해 주세요.")
+        if team_daily_enabled and not team_name.strip():
+            errors.append("팀·플랏 일일 리포트의 팀 이름을 입력해 주세요.")
+        if (
+            team_daily_enabled
+            and plot_metadata_csv.strip()
+            and not Path(plot_metadata_csv.strip()).expanduser().is_file()
+        ):
+            errors.append("플랏 메타데이터 CSV 파일을 찾을 수 없습니다.")
 
         if errors:
             for e in errors:
@@ -943,6 +1368,7 @@ with tab_run:
             },
             "classification": {
                 "method": method,
+                "input_space": "auto",
                 "classes": [],
                 "kmeans": {
                     "n_clusters":     n_classes or 6,
@@ -1015,6 +1441,12 @@ with tab_run:
                 "daily_summary":    save_daily_summary,
                 "spectra_show_std": "std" in report_statistics,
                 "lang":             "ko",
+                "team_daily": {
+                    "enabled":          team_daily_enabled,
+                    "team_name":        team_name.strip() or "Field Team",
+                    "measurement_date": measurement_date.isoformat(),
+                    "metadata_csv":     plot_metadata_csv.strip(),
+                },
             },
         }
 
@@ -1085,42 +1517,29 @@ with tab_run:
 
             out_p = Path(output_dir)
 
-            # Find per-file and daily HTML reports (root + subdirectories).
+            # Keep only reports produced by this run, then persist their paths
+            # so the access buttons remain visible after Streamlit reruns.
             reports = sorted(
-                out_p.rglob("*report*.html"),
+                (
+                    p for p in out_p.rglob("*report*.html")
+                    if p.stat().st_mtime >= _t_wall
+                ),
                 key=lambda p: p.stat().st_mtime,
                 reverse=True,
             )
-            if reports:
-                if run_mode == "📦 전체 배치 처리":
-                    st.markdown(f"📄 **HTML 리포트 ({len(reports)}개):** (최신순)")
-                    for _rp in reports:
-                        st.caption(f"  `{_rp.resolve()}`")
-                    st.caption("브라우저에서 직접 파일을 열어 확인하세요.")
-                else:
-                    st.markdown(
-                        f"📄 **HTML 리포트:** `{reports[0].resolve()}`  \n"
-                        f"브라우저에서 직접 파일을 열어 확인하세요."
-                    )
-
-            # Class-map previews — only files created/updated in this run
-            class_maps = sorted(
-                p for p in out_p.rglob("class_map.png")
-                if p.stat().st_mtime >= _t_wall
+            st.session_state["run_last_reports"] = [
+                str(report.resolve()) for report in reports
+            ]
+            st.session_state["run_last_output_dir"] = str(out_p.resolve())
+            st.session_state["run_last_review_dirs"] = [
+                str(Path(summary["result_dir"]).resolve())
+                for summary in pipeline.batch_summaries
+                if summary.get("result_dir")
+                and Path(summary["result_dir"]).is_dir()
+            ]
+            st.session_state["run_last_team_packages"] = list(
+                getattr(pipeline, "team_packages", [])
             )
-            if class_maps:
-                st.markdown("### 🗺️ 분류 맵 미리보기")
-                n_cols = min(len(class_maps), 3)
-                cols   = st.columns(n_cols)
-                for col, img_path in zip(cols, class_maps[:3]):
-                    with col:
-                        st.image(
-                            str(img_path),
-                            caption=img_path.parent.name,
-                            use_container_width=True,
-                        )
-                if len(class_maps) > 3:
-                    st.caption(f"… 및 {len(class_maps) - 3}개 파일 더 (리포트에서 전체 확인)")
 
         # Log viewer
         if log_handler.lines:
@@ -1129,6 +1548,206 @@ with tab_run:
                 expanded=not pipeline_ok,
             ):
                 st.code("\n".join(log_handler.lines), language="text")
+
+    # Persisted result access: clicking a button reruns Streamlit, so this must
+    # live outside the one-shot `if run_btn` block.
+    _last_report_paths = [
+        Path(path) for path in st.session_state.get("run_last_reports", [])
+        if Path(path).is_file()
+    ]
+    _last_output_path_text = st.session_state.get("run_last_output_dir", "")
+    _last_output_path = (
+        Path(_last_output_path_text)
+        if _last_output_path_text else None
+    )
+    _review_dirs = [
+        Path(path) for path in st.session_state.get("run_last_review_dirs", [])
+        if Path(path).is_dir()
+    ]
+    if not _review_dirs:
+        _review_dirs = list(dict.fromkeys(
+            path.parent for path in _last_report_paths if path.parent.is_dir()
+        ))
+    if _review_dirs:
+        st.markdown("### 🔍 클러스터링 결과 이미지 검수")
+        st.caption(
+            "색이 잎·그림자·밝은 반사·토양 경계와 맞는지 확인하세요. 원하는 "
+            "클러스터만 선택하고 투명도를 조절할 수 있습니다."
+        )
+        _review_choice = st.selectbox(
+            "검수할 분석 결과",
+            options=[str(path) for path in _review_dirs],
+            format_func=lambda value: Path(value).name,
+            key="run_cluster_review_choice",
+        )
+        _render_cluster_review(
+            Path(_review_choice),
+            "run_cluster_review_" + re.sub(r"[^a-zA-Z0-9]+", "_", Path(_review_choice).name),
+        )
+
+    if _last_report_paths or (_last_output_path and _last_output_path.is_dir()):
+        st.markdown("### 📄 최근 분석 결과 열기")
+        _selected_report = None
+        if len(_last_report_paths) > 1:
+            _selected_report_text = st.selectbox(
+                "열어볼 HTML 리포트",
+                options=[str(path) for path in _last_report_paths],
+                format_func=lambda value: (
+                    f"{Path(value).parent.name} / {Path(value).name}"
+                ),
+                key="run_last_report_choice",
+            )
+            _selected_report = Path(_selected_report_text)
+        elif _last_report_paths:
+            _selected_report = _last_report_paths[0]
+            st.caption(f"HTML 리포트: `{_selected_report}`")
+
+        _open_col, _folder_col, _download_col = st.columns(3)
+        with _open_col:
+            if st.button(
+                "🌐 선택한 HTML 리포트 열기",
+                use_container_width=True,
+                disabled=_selected_report is None,
+                key="run_open_report",
+            ):
+                try:
+                    _open_local_path(_selected_report)
+                    st.success("기본 웹브라우저에서 리포트를 열었습니다.")
+                except Exception as exc:
+                    st.error(f"HTML 리포트를 열지 못했습니다: {exc}")
+        with _folder_col:
+            if st.button(
+                "📂 결과 폴더 열기",
+                use_container_width=True,
+                disabled=not (_last_output_path and _last_output_path.is_dir()),
+                key="run_open_output_folder",
+            ):
+                try:
+                    _open_local_path(_last_output_path)
+                    st.success("파일 탐색기에서 결과 폴더를 열었습니다.")
+                except Exception as exc:
+                    st.error(f"결과 폴더를 열지 못했습니다: {exc}")
+        with _download_col:
+            if _selected_report is not None:
+                st.download_button(
+                    "⬇️ HTML 리포트 다운로드",
+                    data=_selected_report.read_bytes(),
+                    file_name=_selected_report.name,
+                    mime="text/html",
+                    use_container_width=True,
+                    key="run_download_report",
+                )
+            else:
+                st.button(
+                    "⬇️ HTML 리포트 다운로드",
+                    disabled=True,
+                    use_container_width=True,
+                    key="run_download_report_disabled",
+                )
+        if not _last_report_paths:
+            st.caption(
+                "이번 실행에서는 HTML 리포트 저장 옵션이 꺼져 있거나 "
+                "리포트가 생성되지 않았습니다. 결과 폴더는 열 수 있습니다."
+            )
+
+    _team_packages = [
+        package for package in st.session_state.get("run_last_team_packages", [])
+        if package.get("directory") and Path(package["directory"]).is_dir()
+    ]
+    if _team_packages:
+        st.markdown("### 👥 팀·플랏 일일 통합 결과")
+        _team_index = 0
+        if len(_team_packages) > 1:
+            _team_labels = [
+                f"{item.get('measurement_date', '')} · {item.get('team', '')}"
+                for item in _team_packages
+            ]
+            _team_label = st.selectbox(
+                "열어볼 팀/측정일",
+                _team_labels,
+                key="run_team_package_choice",
+            )
+            _team_index = _team_labels.index(_team_label)
+        _team_package = _team_packages[_team_index]
+        _team_dir = Path(_team_package["directory"])
+        _team_report = Path(_team_package.get("report", ""))
+        _team_workbook = Path(_team_package.get("workbook", ""))
+        _team_summary_csv = Path(_team_package.get("summary_csv", ""))
+
+        _tp1, _tp2, _tp3 = st.columns(3)
+        with _tp1:
+            if st.button(
+                "🌐 팀 일일 HTML 열기",
+                use_container_width=True,
+                key="open_team_daily_report",
+            ):
+                _open_local_path(_team_report)
+        with _tp2:
+            if st.button(
+                "📂 팀 결과 폴더 열기",
+                use_container_width=True,
+                key="open_team_daily_folder",
+            ):
+                _open_local_path(_team_dir)
+        with _tp3:
+            _download_path = (
+                _team_workbook if _team_workbook.is_file() else _team_summary_csv
+            )
+            if _download_path.is_file():
+                st.download_button(
+                    "⬇️ 팀 결과 Excel/CSV",
+                    data=_download_path.read_bytes(),
+                    file_name=_download_path.name,
+                    mime=(
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        if _download_path.suffix.lower() == ".xlsx"
+                        else "text/csv"
+                    ),
+                    use_container_width=True,
+                    key="download_team_daily_results",
+                )
+        if _team_package.get("workbook_warning"):
+            st.warning(_team_package["workbook_warning"])
+        _team_visuals = [
+            (_team_dir / "plots_ndvi.png", "모든 플랏 NDVI · 공통 범위 -1~1"),
+            (_team_dir / "plot_ndvi_comparison.png", "플랏별 NDVI 중앙값·IQR · QC PASS만"),
+        ]
+        _team_visuals = [item for item in _team_visuals if item[0].is_file()]
+        if _team_visuals:
+            _visual_columns = st.columns(len(_team_visuals))
+            for _column, (_image, _caption) in zip(_visual_columns, _team_visuals):
+                _column.image(str(_image), caption=_caption, use_container_width=True)
+
+    with st.expander("📊 Excel에서 여는 결과 CSV 설명"):
+        st.markdown(
+            "저장 파일은 현재 **`.xlsx` 통합문서가 아니라 Excel에서 바로 열 수 있는 "
+            "UTF-8 CSV**입니다. 파일명에 붙은 접미사로 값의 단위를 구분하세요."
+        )
+        st.markdown(
+            """
+| 파일 | 용도 |
+|---|---|
+| `spectra_{method}_reflectance.csv` | 보정이 통과했을 때 생성되는 **과학 분석용 반사율** 스펙트럼 |
+| `spectra_{method}_raw_dn.csv` | 센서 원본 DN. 보정 문제 진단과 전후 비교용 |
+| `spectra_{method}_processed.csv` | 보정파일이 없을 때 정규화/전처리된 상대값. 절대 반사율이 아님 |
+| `spectra_{method}.csv` | 해당 실행에서 실제로 사용·추출한 값의 대표 파일. 단위는 `value_units` 열로 확인 |
+| `daily_summary_*.csv` | 하루 배치의 파일별 클래스 수, NDVI, 식생 비율, 품질지표, 처리시간 요약 |
+| `all_roi_cluster_spectra*.csv` | 모든 ROI·클러스터 스펙트럼을 한 파일로 합친 결과 |
+| `cluster_summary.csv` | ROI별 클러스터 픽셀 수와 면적 비율(`fraction`, 0–1) 요약 |
+"""
+        )
+        st.markdown(
+            "일반 `spectra_*` CSV는 **한 행이 한 파장**인 wide 형식이며 각 클러스터마다 "
+            "`mean`, `std`, `median`, `q25`, `q75`, `mna`, `sam_avg` 열이 생깁니다. "
+            "ROI의 `cluster_spectra*`는 **ROI × 클러스터 × 파장별 한 행**인 long 형식이며 "
+            "`mean`, `median`, `std`, `q25`, `q75`를 저장합니다. `mna`는 값 기준, "
+            "`sam_avg`는 스펙트럼 모양 기준의 대표 픽셀 평균입니다."
+        )
+        st.info(
+            "논문용 값은 `_reflectance.csv`에서 `value_units=reflectance`, "
+            "`calibration_applied=True`, `calibration_qc_status=PASS`를 우선 확인하세요. "
+            "`REVIEW`는 점프·포화 등 경고를 검토한 뒤 사용하고, `FAIL`은 사용하지 않는 것이 안전합니다."
+        )
 
 
 # ============================================================
@@ -3297,6 +3916,28 @@ with tab_panel:
                             "유효한 보정 밴드가 없습니다. 패널의 포화와 Dark 설정을 확인하세요."
                         )
 
+                    _cal_qc = _rad.evaluate_weighted_calibration(
+                        _dns,
+                        _rs,
+                        np.asarray(_dark_spec),
+                        _a,
+                        _bb,
+                        fit_quality=_q,
+                        panel_usable_masks=[
+                            (p.get("saturation") or {}).get(
+                                "usable_band_mask", np.ones(_pB, dtype=bool)
+                            )
+                            for p in _fit_panels
+                        ],
+                        panel_uniformities=[
+                            p.get("uniformity") for p in _fit_panels
+                        ],
+                        dark_source_type=(
+                            st.session_state.get("pn_dark_qc") or {}
+                        ).get("source_type", "unknown"),
+                        wavelengths=_pwl,
+                    )
+
                     _preview_cube = _rad.apply_resolved_calibration(
                         _pdata, {"a": _a, "b": _bb}
                     )
@@ -3344,6 +3985,9 @@ with tab_panel:
                         "fallback_band_indices": _q["fallback_band_indices"],
                         "blended_band_count": _q["blended_band_count"],
                         "median_coefficient_cv": _q["median_coefficient_cv"],
+                        "qc_status": _cal_qc["status"],
+                        "qc_auto_apply_allowed": _cal_qc["auto_apply_allowed"],
+                        "qc_summary": _cal_qc,
                     }
                     _saved_cal = _rad.save_calibration(
                         str(_cal_path), _a, _bb, wavelengths=_pwl, meta=_meta
@@ -3358,14 +4002,32 @@ with tab_panel:
                         "saved_path": _saved_cal,
                         "dark_source_type": _dark_source_type,
                         "manual_dark_dn": _dark_qc_used.get("constant_dn"),
+                        "calibration_qc": _cal_qc,
+                        "panel_predictions": [
+                            (np.asarray(spectrum) * _a + _bb).tolist()
+                            for spectrum in _dns
+                        ],
                     }
                     st.session_state["pn_preview_rgb"] = _preview_rgb
                     st.session_state["pn_saved_calibration"] = _saved_cal
-                    st.session_state["active_calibration_path"] = _saved_cal
-                    st.success(
-                        f"✅ 자동 보정 완료 · 패널 {len(_fit_panels)}장 · "
-                        f"유효 밴드 {_pB - _q['invalid_band_count']}/{_pB}"
+                    st.session_state["active_calibration_path"] = (
+                        _saved_cal if _cal_qc["auto_apply_allowed"] else ""
                     )
+                    if _cal_qc["status"] == "PASS":
+                        st.success(
+                            f"✅ QC PASS · 패널 {len(_fit_panels)}장 · "
+                            f"유효 밴드 {_pB - _q['invalid_band_count']}/{_pB}"
+                        )
+                    elif _cal_qc["status"] == "REVIEW":
+                        st.warning(
+                            "⚠️ QC REVIEW · 시험 분석에는 연결했지만, 논문용 사용 전 "
+                            "아래 경고와 재구성 스펙트럼을 확인하세요."
+                        )
+                    else:
+                        st.error(
+                            "⛔ QC FAIL · 파일은 점검 기록으로 저장했지만 전체 필드 "
+                            "분석에는 연결하지 않았습니다. 패널 ROI/Dark를 다시 지정하세요."
+                        )
                 except Exception:
                     st.error("❌ 계산 실패")
                     st.code(traceback.format_exc(), language="python")
@@ -3374,16 +4036,27 @@ with tab_panel:
             if _fit:
                 st.markdown("#### 5️⃣ 자동 반사율 보정 결과")
                 _q = _fit["quality"]
-                _qa, _qb, _qc, _qd = st.columns(4)
-                _qa.metric("유효 밴드", f"{_pB - _q['invalid_band_count']} / {_pB}")
-                _qb.metric("다중 패널 결합", f"{_q['blended_band_count']} 밴드")
-                _qc.metric("낮은 패널 대체", f"{_q['fallback_band_count']} 밴드")
+                _cal_qc = _fit.get("calibration_qc") or {}
+                _qa, _qb, _qc, _qd, _qe = st.columns(5)
+                _qa.metric("QC 등급", _cal_qc.get("status", "미평가"))
+                _qb.metric("유효 밴드", f"{_pB - _q['invalid_band_count']} / {_pB}")
+                _qc.metric("다중 패널 결합", f"{_q['blended_band_count']} 밴드")
+                _qd.metric("낮은 패널 대체", f"{_q['fallback_band_count']} 밴드")
                 _cv_value = _q.get("median_coefficient_cv")
-                _qd.metric(
+                _qe.metric(
                     "패널 일치도(CV)",
                     "—" if _cv_value is None else f"{100 * _cv_value:.2f}%",
                     help="공통 유효 파장에서 패널별 보정계수가 얼마나 일치하는지 나타냅니다.",
                 )
+                _qc_reasons = list(_cal_qc.get("severe_reasons") or []) + list(
+                    _cal_qc.get("review_reasons") or []
+                )
+                if _qc_reasons:
+                    _reason_text = "\n".join(f"- {reason}" for reason in _qc_reasons)
+                    if _cal_qc.get("status") == "FAIL":
+                        st.error("QC에서 자동 적용을 차단한 이유:\n\n" + _reason_text)
+                    else:
+                        st.warning("QC 검토 항목:\n\n" + _reason_text)
                 if _q["invalid_band_count"]:
                     st.warning(
                         f"⚠️ 어떤 패널에서도 신뢰할 신호가 없었던 "
@@ -3416,6 +4089,37 @@ with tab_panel:
                     title="파장별 패널 결합 — 포화에 가까워질수록 가중치가 부드럽게 감소",
                 )
                 st.plotly_chart(_wfig, use_container_width=True, key="pn_weight_chart")
+
+                if _fit.get("panel_predictions"):
+                    _rfig = go.Figure()
+                    for _index, (_name, _prediction, _target) in enumerate(zip(
+                        _fit["names"],
+                        _fit["panel_predictions"],
+                        _fit["reflectances"],
+                    )):
+                        _rfig.add_trace(go.Scatter(
+                            x=_xax,
+                            y=_prediction,
+                            mode="lines",
+                            name=f"{_name} 보정 결과",
+                        ))
+                        _rfig.add_hline(
+                            y=float(_target),
+                            line_dash="dot",
+                            line_color="gray",
+                            annotation_text=f"목표 {float(_target):.3f}",
+                        )
+                    _rfig.update_layout(
+                        height=340,
+                        xaxis_title="Wavelength (nm)",
+                        yaxis_title="재구성 반사율",
+                        margin=dict(l=50, r=10, t=35, b=40),
+                        legend=dict(orientation="h", y=1.18),
+                        title="보정파일 자기점검 — 각 패널이 입력 반사율로 복원되는가",
+                    )
+                    st.plotly_chart(
+                        _rfig, use_container_width=True, key="pn_reconstruction_chart"
+                    )
 
                 _cfig = go.Figure()
                 _cfig.add_trace(go.Scatter(x=_xax, y=_fit["a"], mode="lines",
@@ -3456,10 +4160,16 @@ with tab_panel:
                         "BIL에는 계산된 반사율 값이 그대로 유지됩니다."
                     )
 
-                st.success(
-                    "✅ 보정파일이 자동 저장되어 전체 필드 분석에 연결되었습니다: "
-                    f"`{Path(_fit['saved_path']).resolve()}`"
-                )
+                if (_fit.get("calibration_qc") or {}).get("auto_apply_allowed"):
+                    st.success(
+                        "✅ 보정파일이 저장되어 전체 필드 분석에 연결되었습니다: "
+                        f"`{Path(_fit['saved_path']).resolve()}`"
+                    )
+                else:
+                    st.error(
+                        "⛔ QC FAIL 파일은 점검 기록으로만 저장되었고 자동 연결되지 "
+                        f"않았습니다: `{Path(_fit['saved_path']).resolve()}`"
+                    )
 
                 _export_factor = st.selectbox(
                     "반사율 BIL 공간 binning",

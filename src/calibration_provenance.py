@@ -75,6 +75,8 @@ def add_calibration_provenance(
         ("calibration_type", str(info.get("calibration_type") or "")),
         ("calibration_method", str(meta.get("method") or "")),
         ("calibration_formula", str(meta.get("formula") or "")),
+        ("calibration_qc_status", str(meta.get("qc_status") or "UNASSESSED")),
+        ("calibration_qc_auto_apply_allowed", meta.get("qc_auto_apply_allowed", "")),
         ("calibration_source_image", str(meta.get("source_image") or "")),
         ("dark_source_type", str(meta.get("dark_source_type") or "")),
         ("dark_source", str(meta.get("dark_source") or "")),

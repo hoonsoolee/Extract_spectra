@@ -1,15 +1,33 @@
 """
 app_en.py
 ---------
-Streamlit GUI for the Hyperspectral Field Crop Analysis Pipeline  (English UI).
+English presentation of the shared Hyperspectral Field Crop Analysis app.
+
+The implementation is intentionally executed from ``app.py`` so Korean and
+English users always receive the same CERES, ROI, calibration, clustering, and
+report features.  ``src.english_ui`` translates display text without changing
+the values used by the analysis logic.
 
 Run with:
     python -m streamlit run app_en.py
 """
 
+import runpy
+from pathlib import Path as _SharedPath
+
+import streamlit as _shared_st
+
+from src.english_ui import install_english_ui as _install_english_ui
+
+
+_install_english_ui()
+runpy.run_path(str(_SharedPath(__file__).with_name("app.py")), run_name="__main__")
+_shared_st.stop()
+
 import logging
 import sys
 import traceback
+import datetime
 from collections import Counter
 from pathlib import Path
 
@@ -23,6 +41,7 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.report_options import REPORT_PRESETS
+from src.local_open import open_local_path as _open_local_path
 
 # ============================================================
 # Page config
@@ -609,6 +628,52 @@ with st.sidebar:
                 "If calibration or required wavelengths are unavailable, the report records why."
             )
 
+    with st.expander(
+        "👥 Team / plot daily package",
+        expanded=run_mode == "📦 Batch (all files)",
+    ):
+        team_daily_enabled = st.checkbox(
+            "Create a team-facing daily package after the batch",
+            value=True,
+            disabled=run_mode != "📦 Batch (all files)",
+            key="team_daily_enabled",
+            help=(
+                "Combines per-file results into one HTML, Excel workbook, and NDVI "
+                "comparison without reopening the hyperspectral cubes."
+            ),
+        )
+        team_name = st.text_input(
+            "Team name",
+            value="Field Team",
+            key="team_daily_name",
+            disabled=not team_daily_enabled,
+        )
+        measurement_date = st.date_input(
+            "Acquisition date",
+            value=datetime.date.today(),
+            key="team_daily_date",
+            disabled=not team_daily_enabled,
+        )
+        plot_metadata_csv = st.text_input(
+            "Plot metadata CSV (optional)",
+            value="",
+            placeholder="filename, plot_id, treatment, genotype, replicate",
+            key="team_daily_metadata_csv",
+            disabled=not team_daily_enabled,
+        )
+        st.caption(
+            "Without a CSV, the filename becomes the plot ID. Optional columns: "
+            "filename, plot_id, treatment, genotype, replicate, team, measurement_date."
+        )
+
+    team_daily_enabled = bool(
+        team_daily_enabled and run_mode == "📦 Batch (all files)"
+    )
+    if team_daily_enabled:
+        report_sections["spectral_indices"] = True
+        if "NDVI" not in report_indices:
+            report_indices.append("NDVI")
+
     st.markdown("---")
 
     # ── Output / misc ────────────────────────────────────────
@@ -623,6 +688,9 @@ with st.sidebar:
     st.markdown("---")
     run_btn = st.button("🚀  Run Analysis", type="primary", use_container_width=True)
 
+
+st.session_state.setdefault("run_last_reports", [])
+st.session_state.setdefault("run_last_output_dir", "")
 
 # ============================================================
 # Main area
@@ -673,6 +741,14 @@ with tab_run:
             errors.append(f"Method '{method}' requires a labels CSV.")
         if run_mode == "🔍 Single File" and not _run_single_file:
             errors.append("Single File mode: scan the folder and select a file first.")
+        if team_daily_enabled and not team_name.strip():
+            errors.append("Please enter a team name for the team/plot daily package.")
+        if (
+            team_daily_enabled
+            and plot_metadata_csv.strip()
+            and not Path(plot_metadata_csv.strip()).expanduser().is_file()
+        ):
+            errors.append("The plot metadata CSV file could not be found.")
 
         if errors:
             for e in errors:
@@ -778,6 +854,12 @@ with tab_run:
                 "daily_summary":    save_daily_summary,
                 "spectra_show_std": "std" in report_statistics,
                 "lang":             "en",
+                "team_daily": {
+                    "enabled":          team_daily_enabled,
+                    "team_name":        team_name.strip() or "Field Team",
+                    "measurement_date": measurement_date.isoformat(),
+                    "metadata_csv":     plot_metadata_csv.strip(),
+                },
             },
         }
 
@@ -824,23 +906,23 @@ with tab_run:
 
             out_p = Path(output_dir)
 
-            # Find per-file and daily reports (root + subdirectories)
+            # Keep only reports produced by this run and persist the paths so
+            # result-access buttons survive subsequent Streamlit reruns.
             reports = sorted(
-                out_p.rglob("*report*.html"),
+                (
+                    p for p in out_p.rglob("*report*.html")
+                    if p.stat().st_mtime >= _t_wall
+                ),
                 key=lambda p: p.stat().st_mtime,
                 reverse=True,
             )
-            if reports:
-                if run_mode == "📦 Batch (all files)":
-                    st.markdown(f"📄 **HTML Reports ({len(reports)}):** (newest first)")
-                    for _rp in reports:
-                        st.caption(f"  `{_rp.resolve()}`")
-                    st.caption("Open any file directly in your browser to view it.")
-                else:
-                    st.markdown(
-                        f"📄 **HTML Report:** `{reports[0].resolve()}`  \n"
-                        f"Open the file directly in your browser to view it."
-                    )
+            st.session_state["run_last_reports"] = [
+                str(report.resolve()) for report in reports
+            ]
+            st.session_state["run_last_output_dir"] = str(out_p.resolve())
+            st.session_state["run_last_team_packages"] = list(
+                getattr(pipeline, "team_packages", [])
+            )
 
             # Class-map previews — only files created/updated in this run
             class_maps = sorted(
@@ -868,6 +950,170 @@ with tab_run:
                 expanded=not pipeline_ok,
             ):
                 st.code("\n".join(log_handler.lines), language="text")
+
+    # This panel is outside `if run_btn` so its buttons remain available after
+    # their own click-triggered reruns.
+    _last_report_paths = [
+        Path(path) for path in st.session_state.get("run_last_reports", [])
+        if Path(path).is_file()
+    ]
+    _last_output_path_text = st.session_state.get("run_last_output_dir", "")
+    _last_output_path = (
+        Path(_last_output_path_text)
+        if _last_output_path_text else None
+    )
+    if _last_report_paths or (_last_output_path and _last_output_path.is_dir()):
+        st.markdown("### 📄 Open Recent Analysis Results")
+        _selected_report = None
+        if len(_last_report_paths) > 1:
+            _selected_report_text = st.selectbox(
+                "HTML report to open",
+                options=[str(path) for path in _last_report_paths],
+                format_func=lambda value: (
+                    f"{Path(value).parent.name} / {Path(value).name}"
+                ),
+                key="run_last_report_choice",
+            )
+            _selected_report = Path(_selected_report_text)
+        elif _last_report_paths:
+            _selected_report = _last_report_paths[0]
+            st.caption(f"HTML report: `{_selected_report}`")
+
+        _open_col, _folder_col, _download_col = st.columns(3)
+        with _open_col:
+            if st.button(
+                "🌐 Open Selected HTML Report",
+                use_container_width=True,
+                disabled=_selected_report is None,
+                key="run_open_report",
+            ):
+                try:
+                    _open_local_path(_selected_report)
+                    st.success("Opened the report in the default web browser.")
+                except Exception as exc:
+                    st.error(f"Could not open the HTML report: {exc}")
+        with _folder_col:
+            if st.button(
+                "📂 Open Results Folder",
+                use_container_width=True,
+                disabled=not (_last_output_path and _last_output_path.is_dir()),
+                key="run_open_output_folder",
+            ):
+                try:
+                    _open_local_path(_last_output_path)
+                    st.success("Opened the results folder.")
+                except Exception as exc:
+                    st.error(f"Could not open the results folder: {exc}")
+        with _download_col:
+            if _selected_report is not None:
+                st.download_button(
+                    "⬇️ Download HTML Report",
+                    data=_selected_report.read_bytes(),
+                    file_name=_selected_report.name,
+                    mime="text/html",
+                    use_container_width=True,
+                    key="run_download_report",
+                )
+            else:
+                st.button(
+                    "⬇️ Download HTML Report",
+                    disabled=True,
+                    use_container_width=True,
+                    key="run_download_report_disabled",
+                )
+        if not _last_report_paths:
+            st.caption(
+                "No HTML report was created in the most recent run. The report "
+                "option may have been disabled; the output folder is still available."
+            )
+
+    _team_packages = [
+        package for package in st.session_state.get("run_last_team_packages", [])
+        if package.get("directory") and Path(package["directory"]).is_dir()
+    ]
+    if _team_packages:
+        st.markdown("### 👥 Team / Plot Daily Results")
+        _team_index = 0
+        if len(_team_packages) > 1:
+            _team_labels = [
+                f"{item.get('measurement_date', '')} · {item.get('team', '')}"
+                for item in _team_packages
+            ]
+            _team_label = st.selectbox(
+                "Team/date package",
+                _team_labels,
+                key="run_team_package_choice",
+            )
+            _team_index = _team_labels.index(_team_label)
+        _team_package = _team_packages[_team_index]
+        _team_dir = Path(_team_package["directory"])
+        _team_report = Path(_team_package.get("report", ""))
+        _team_workbook = Path(_team_package.get("workbook", ""))
+        _team_summary_csv = Path(_team_package.get("summary_csv", ""))
+        _tp1, _tp2, _tp3 = st.columns(3)
+        with _tp1:
+            if st.button("🌐 Open Team HTML", use_container_width=True, key="open_team_daily_report"):
+                _open_local_path(_team_report)
+        with _tp2:
+            if st.button("📂 Open Team Folder", use_container_width=True, key="open_team_daily_folder"):
+                _open_local_path(_team_dir)
+        with _tp3:
+            _download_path = _team_workbook if _team_workbook.is_file() else _team_summary_csv
+            if _download_path.is_file():
+                st.download_button(
+                    "⬇️ Team Excel/CSV",
+                    data=_download_path.read_bytes(),
+                    file_name=_download_path.name,
+                    mime=(
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        if _download_path.suffix.lower() == ".xlsx" else "text/csv"
+                    ),
+                    use_container_width=True,
+                    key="download_team_daily_results",
+                )
+        if _team_package.get("workbook_warning"):
+            st.warning(_team_package["workbook_warning"])
+        _team_visuals = [
+            (_team_dir / "plots_ndvi.png", "All plots NDVI · common -1 to 1 scale"),
+            (_team_dir / "plot_ndvi_comparison.png", "Plot NDVI median/IQR · QC PASS only"),
+        ]
+        _team_visuals = [item for item in _team_visuals if item[0].is_file()]
+        if _team_visuals:
+            _visual_columns = st.columns(len(_team_visuals))
+            for _column, (_image, _caption) in zip(_visual_columns, _team_visuals):
+                _column.image(str(_image), caption=_caption, use_container_width=True)
+
+    with st.expander("📊 Result CSV guide (opens in Excel)"):
+        st.markdown(
+            "The saved tables are currently **UTF-8 CSV files that open directly in "
+            "Excel**, not a single `.xlsx` workbook. Use the filename suffix and the "
+            "`value_units` column to identify the value scale."
+        )
+        st.markdown(
+            """
+| File | Purpose |
+|---|---|
+| `spectra_{method}_reflectance.csv` | Science-ready reflectance spectra, created when valid calibration is applied |
+| `spectra_{method}_raw_dn.csv` | Original sensor DN for diagnostics and before/after comparison |
+| `spectra_{method}_processed.csv` | Normalized/processed relative values when calibration is unavailable; not absolute reflectance |
+| `spectra_{method}.csv` | Main values from the current run; verify its scale in `value_units` |
+| `daily_summary_*.csv` | Per-file class count, NDVI, vegetation fraction, quality metrics, and elapsed time |
+| `all_roi_cluster_spectra*.csv` | Combined spectra for all ROIs and clusters |
+| `cluster_summary.csv` | Pixel count and area fraction (`fraction`, 0–1) for each ROI cluster |
+"""
+        )
+        st.markdown(
+            "The main `spectra_*` CSV is wide format with one row per wavelength and "
+            "`mean`, `std`, `median`, `q25`, `q75`, `mna`, and `sam_avg` columns per cluster. "
+            "ROI `cluster_spectra*` files are long format with one row per "
+            "ROI × cluster × wavelength and store `mean`, `median`, `std`, `q25`, and `q75`. "
+            "`mna` selects representative pixels by value; `sam_avg` selects by spectral shape."
+        )
+        st.info(
+            "For publication, prefer `_reflectance.csv` and verify "
+            "`value_units=reflectance`, `calibration_applied=True`, and "
+            "`calibration_qc_status=PASS`. REVIEW results require inspection; avoid FAIL results."
+        )
 
 
 # ============================================================

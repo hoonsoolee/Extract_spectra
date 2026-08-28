@@ -409,6 +409,10 @@ pre code { background: none; color: inherit; padding: 0; }
     <li><a href="#cover">Overview</a></li>
     <li><a href="#s1">1. Installation</a></li>
     <li><a href="#s2">2. Starting the App</a></li>
+    <li class="toc-sub"><ul>
+      <li><a href="#workflow-roi">2.1 Define an ROI &amp; Extract Spectra</a></li>
+      <li><a href="#workflow-calibration">2.2 Build White/Dark Calibration</a></li>
+    </ul></li>
     <li><a href="#s3">3. Data Source</a></li>
     <li><a href="#s4">4. Processing Mode</a></li>
     <li><a href="#s5">5. Classification Methods</a></li>
@@ -422,7 +426,7 @@ pre code { background: none; color: inherit; padding: 0; }
       <li><a href="#s5-nmf">5.7 NMF</a></li>
     </ul></li>
     <li><a href="#s6">6. Number of Classes</a></li>
-    <li><a href="#s7">7. Output Settings</a></li>
+    <li><a href="#s7">7. Report &amp; Output Settings</a></li>
     <li><a href="#s8">8. Running the Analysis</a></li>
     <li><a href="#s9">9. HTML Report</a></li>
     <li class="toc-sub"><ul>
@@ -432,6 +436,7 @@ pre code { background: none; color: inherit; padding: 0; }
       <li><a href="#s9-spectra">9.4 Spectra Chart</a></li>
       <li><a href="#s9-quality">9.5 Quality Assessment</a></li>
       <li><a href="#s9-veg">9.6 Vegetation Separation</a></li>
+      <li><a href="#s9-roi-qc">9.7 Raw vs Calibrated ROI QC</a></li>
     </ul></li>
     <li><a href="#s10">10. Output Files</a></li>
     <li><a href="#s11">11. Troubleshooting</a></li>
@@ -446,23 +451,23 @@ pre code { background: none; color: inherit; padding: 0; }
 <div class="cover" id="cover">
   <div class="badge">User Manual</div>
   <h1>Hyperspectral Field Crop<br>Analysis Tool</h1>
-  <p class="subtitle">Unsupervised Edition — No Labels Required</p>
+  <p class="subtitle">Calibration · Clustering · ROI Spectra · Selectable Reports</p>
   <p class="desc">
     This tool automatically classifies pixels in hyperspectral field crop images
-    and extracts per-class reflectance spectra. It runs entirely on your local
-    machine — no cloud, no internet, no labelled training data required.
-    Results are saved as a CSV file and a fully interactive HTML report.
+    and extracts radiometrically traceable class/ROI spectra. It supports
+    White/Dark or weighted multi-panel calibration, large local ENVI files,
+    selectable reports, and separate raw-DN/calibrated-reflectance exports.
   </p>
   <div class="feature-grid">
     <div class="feature-pill">&#x1F331; Hybrid (NDVI + K-means)</div>
     <div class="feature-pill">&#x1F4CA; K-Means Clustering</div>
     <div class="feature-pill">&#x1F4D0; Spectral Angle Mapping</div>
     <div class="feature-pill">&#x1F916; Autoencoder (Deep Learning)</div>
-    <div class="feature-pill">&#x1F4C4; Interactive HTML Report</div>
-    <div class="feature-pill">&#x1F4C8; Per-Class Spectra CSV</div>
+    <div class="feature-pill">&#x1F4C4; Selectable HTML / Daily Report</div>
+    <div class="feature-pill">&#x1F4C8; Raw DN + Reflectance Spectra</div>
   </div>
   <div class="meta">
-    GitHub: <a href="https://github.com/hoonsoolee/Extract_spectra">https://github.com/hoonsoolee/Extract_spectra</a>
+    Updated: 25 August 2026 &nbsp;|&nbsp; GitHub: <a href="https://github.com/hoonsoolee/Extract_spectra">https://github.com/hoonsoolee/Extract_spectra</a>
     &nbsp;&nbsp;|&nbsp;&nbsp; Python 3.9+ &nbsp;|&nbsp; Runs on CPU &nbsp;|&nbsp; Windows / macOS / Linux
   </div>
 </div>
@@ -507,7 +512,7 @@ cd Extract_spectra</pre>
       <pre>pip install torch</pre>
     </li>
     <li><p><strong>Verify the installation</strong> by starting the app:</p>
-      <pre>python -m streamlit run app_unsupervised.py</pre>
+      <pre>python -m streamlit run app.py</pre>
       <p>Your browser should open automatically at <code>http://localhost:8501</code>.</p>
     </li>
   </ol>
@@ -542,16 +547,20 @@ cd Extract_spectra</pre>
   <h3>Launch Commands</h3>
   <div class="two-col">
     <div class="option-box">
-      <h4>Unsupervised Edition <em>(recommended)</em></h4>
-      <pre>python -m streamlit run app_unsupervised.py</pre>
-      <p style="font-size:13px;margin:0;color:#555;">Hybrid &middot; K-Means &middot; SAM &middot; Autoencoder<br>No labels required for any method.</p>
+      <h4>Full Research Workflow <em>(Korean UI)</em></h4>
+      <pre>python -m streamlit run app.py</pre>
+      <p style="font-size:13px;margin:0;color:#555;">Full-image analysis, ROI spectra, panel calibration, and pixel labelling.</p>
     </div>
     <div class="option-box secondary">
-      <h4>Full Edition</h4>
+      <h4>Full Research Workflow <em>(English UI)</em></h4>
       <pre>python -m streamlit run app_en.py</pre>
-      <p style="font-size:13px;margin:0;color:#555;">All methods including Random Forest and 1D-CNN.<br>Supervised methods require a labelled CSV file.</p>
+      <p style="font-size:13px;margin:0;color:#555;">The same CERES, panel calibration, ROI, clustering, and reporting implementation with English presentation text.</p>
     </div>
   </div>
+  <div class="callout info"><div class="callout-icon">&#x1F5FA;</div><div class="callout-body">
+    <strong>ROI analysis</strong>
+    Use <strong>ROI Analysis &amp; Re-clustering</strong> in the English app sidebar. The standalone <code>app_roi_clustering.py</code> entry is the Korean developer view.
+  </div></div>
 
   <div class="callout tip">
     <div class="callout-icon">&#x1F4A1;</div>
@@ -574,6 +583,8 @@ cd Extract_spectra</pre>
         <li>&#x1F9EC; Classification Method</li>
         <li>&#x1F522; Number of Classes</li>
         <li>&#x1F527; Method Parameters</li>
+        <li>&#x1F4D0; Reflectance / Calibration</li>
+        <li>&#x1F4CB; Result Report preset</li>
         <li>&#x1F4C1; Output Settings</li>
         <li style="margin-top:8px;"><strong>&#x1F680; Run Analysis button</strong></li>
       </ul>
@@ -581,14 +592,93 @@ cd Extract_spectra</pre>
     <div style="background:#f0f4f8;border:1.5px solid #1a3a5c;border-radius:10px;padding:18px;">
       <h4 style="color:#1a3a5c;margin-top:0;">MAIN AREA — Results</h4>
       <ul style="font-size:13px;padding-left:16px;color:#444;">
-        <li>Configuration summary card</li>
+        <li>Analysis, ROI Spectrum, Panel Calibration, and Pixel Labelling tabs</li>
         <li>After run completes:</li>
         <li style="list-style:none;padding-left:12px;">&#x2714; Success banner + elapsed time</li>
-        <li style="list-style:none;padding-left:12px;">&#x2714; HTML report file path</li>
+        <li style="list-style:none;padding-left:12px;">&#x2714; Open/download HTML report buttons</li>
+        <li style="list-style:none;padding-left:12px;">&#x2714; Open results folder button</li>
         <li style="list-style:none;padding-left:12px;">&#x2714; Classification map preview</li>
         <li style="list-style:none;padding-left:12px;">&#x2714; Run log (collapsible)</li>
       </ul>
     </div>
+  </div>
+
+  <h3 id="workflow-roi">2.1 Define an ROI and Extract Spectra — Step by Step</h3>
+  <div class="callout tip">
+    <div class="callout-icon">&#x1F4A1;</div>
+    <div class="callout-body">
+      <strong>Shortest path</strong>
+      <code>Run app.py → ROI Spectrum tab → select file → Load → choose ROI tool → draw ROI → inspect spectrum → save CSV</code>
+    </div>
+  </div>
+
+  <ol class="steps">
+    <li><p><strong>Prepare the file.</strong> In the left sidebar, select a local data folder and click <strong>Scan Folder</strong>. Alternatively, use the <strong>🪟 Select</strong> button in the ROI screen to choose an ENVI <code>.hdr</code> or its linked <code>.bil</code> file.</p></li>
+    <li><p>Open the <strong>📈 ROI Spectrum</strong> (<code>ROI 스펙트럼</code>) tab. Choose the hyperspectral file and downsampling level, then click <strong>📂 Load</strong>. Use ×1 for a small image; start with ×4 or more for a multi-gigabyte file.</p></li>
+    <li><p>Read the <strong>calibration-status banner</strong>. If a compatible <code>calibration.npz</code> is active or automatically discovered, calibrated reflectance is available. Without a profile, the graph and CSV contain raw DN.</p></li>
+    <li><p>Use <strong>Full-width ROI image</strong> and the image-height slider for a larger working view. Very long line-scan images also show a row/column-range slider.</p></li>
+    <li><p>For a small target, choose <strong>🔍 Zoom</strong> and drag a box over the area. After the zoom is retained, switch back to Box, Lasso, or Polygon and define the actual ROI. Use <strong>↩ Full View</strong> to reset.</p></li>
+    <li><p>After the ROI is defined, mean, median, and standard-deviation spectra are calculated. With calibration connected, switch among <strong>Calibrated Reflectance</strong>, <strong>Raw DN</strong>, and <strong>Raw/Calibrated Comparison</strong>. The wavelength and Y-axis display ranges affect the plot only, not the saved full-band data.</p></li>
+    <li><p>Confirm that the ROI outline and spectrum are correct, then click <strong>💾 Save CSV</strong>. The suggested filename ends in <code>_roi_reflectance.csv</code> when calibrated and <code>_roi_raw_dn.csv</code> otherwise.</p></li>
+  </ol>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th>ROI tool</th><th>Mouse action</th><th>Best use</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Box ROI</strong></td><td>Drag a rectangle over the target.</td><td>Plots, panels, and rectangular treatment areas.</td></tr>
+      <tr><td><strong>Lasso ROI</strong></td><td>Hold and draw a freehand outline.</td><td>Quickly enclosing an irregular crop area.</td></tr>
+      <tr><td><strong>Click Polygon ROI</strong></td><td>Click at least three boundary vertices, then click <strong>Finish Polygon</strong>.</td><td>Precise leaf or plot boundaries.</td></tr>
+      <tr><td><strong>Zoom</strong></td><td>Drag a box over the area to enlarge, then return to an ROI mode.</td><td>Precise work on long or visually compressed images.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout warning">
+    <div class="callout-icon">&#x26A0;</div>
+    <div class="callout-body">
+      <strong>Publication-ready spectra</strong>
+      If the screen says that reflectance calibration is not applied, the values are raw DN. Complete Section 2.2 and reload the file, or select a compatible calibration profile, before treating the spectrum as reflectance.
+    </div>
+  </div>
+
+  <h3 id="workflow-calibration">2.2 Build a White/Dark Reflectance Calibration — Step by Step</h3>
+  <p>In this application, “making white balance” means building wavelength-specific <strong>reflectance calibration coefficients</strong> from panels of known reflectance and a Sensor Dark. It does not merely adjust RGB color, and the reusable product is <code>calibration.npz</code>, not <code>whitebalance.bil</code>.</p>
+
+  <ol class="steps">
+    <li><p>Open the <strong>🎯 Panel Calibration</strong> (<code>패널 보정</code>) tab in <code>app.py</code>.</p></li>
+    <li><p>Under <strong>1. Open an image containing panels</strong>, select a reference scan or a field image containing the panels and click <strong>📂 Load</strong>. Use downsampling ×1–2 when panels are small. Prefer a panel scan acquired close in time under the same illumination and camera settings as the target scene.</p></li>
+    <li><p>Under <strong>2. Define panel regions</strong>, use Box or Lasso to select only the <strong>interior</strong> of one panel. Avoid edges, shadow, soil, contamination, and specular glare. Zoom first if necessary.</p></li>
+    <li><p>Review uniformity and saturated-band warnings. Enter a panel name and its certified reflectance—for example, 99%=<code>0.990</code>, 50%=<code>0.500</code>, or 25%=<code>0.250</code>—then click <strong>Add this region as a panel</strong>. Repeat for the other panels.</p></li>
+    <li><p>Review the registered-panel table. The program does not convert a 50% panel into 99%; it uses the supplied reflectance. When only some wavelengths are saturated, that bright panel receives zero weight at those bands and a valid lower-reflectance panel can carry the calibration through them.</p></li>
+    <li><p>Under <strong>4. Sensor Dark</strong>, choose a measured Dark file or a manual constant DN. Publication work should use a lens-covered Dark acquired with matching integration time and gain. Use the default constant <code>100 DN</code> only as a documented temporary fallback.</p></li>
+    <li><p>Click <strong>Automatic Reflectance Calibration</strong>. The software evaluates saturation, signal above Dark, and inter-panel consistency, then estimates the wavelength-specific equation <code>R = a × DN + b</code>.</p></li>
+    <li><p>Inspect the <strong>QC PASS / REVIEW / FAIL</strong> grade, valid bands, lower-panel fallback bands, coefficient CV, reconstructed panel spectra, panel-weight curves, and the calibrated RGB preview. Bands with no trustworthy panel signal remain NaN instead of being invented by interpolation.</p></li>
+  </ol>
+
+  <div class="callout warn">
+    <strong>Automatic-use rule:</strong> PASS is connected automatically; REVIEW is connected for trial analysis with a warning; FAIL is saved for audit but blocked from whole-field analysis. Synthetic constant Dark receives at least REVIEW.
+  </div>
+
+  <div class="callout info">
+    <div class="callout-icon">&#x1F4BE;</div>
+    <div class="callout-body">
+      <strong>Saved location and automatic connection</strong>
+      The profile is saved automatically as <code>output/calibration/panel-image-name_weighted_dark_calibration.npz</code>. PASS/REVIEW profiles become active for Full Analysis and ROI Spectrum; FAIL profiles are blocked. Later runs check both compatibility and QC status while searching the scene folder and <code>output/calibration</code>.
+    </div>
+  </div>
+
+  <div class="tbl-wrap">
+  <table>
+    <thead><tr><th>On-screen warning</th><th>Meaning and action</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Low uniformity</strong></td><td>Background, shadow, or a panel edge may be mixed in. Tighten the ROI toward the panel center.</td></tr>
+      <tr><td><strong>Some saturated bands</strong></td><td>Only that panel is excluded at those wavelengths. A valid lower-reflectance panel is used when available.</td></tr>
+      <tr><td><strong>All bands saturated</strong></td><td>The ROI cannot be registered as a panel. Use a lower-reflectance panel or a reference scan with lower exposure.</td></tr>
+      <tr><td><strong>Synthetic Dark in use</strong></td><td>A constant across bands is being used as a screening fallback and is recorded in provenance. A measured Dark is preferred for final analysis.</td></tr>
+      <tr><td><strong>Incompatible calibration</strong></td><td>Band count or wavelengths do not match the scene. Rebuild the profile from a compatible sensor acquisition.</td></tr>
+    </tbody>
+  </table>
   </div>
 
   <h3>Placing Your Data</h3>
@@ -678,7 +768,7 @@ cd Extract_spectra</pre>
         <li>Click <strong>Run Analysis</strong>.<br>
           All supported files are processed in alphabetical order.</li>
         <li>Each file gets its own subfolder and HTML report.</li>
-        <li>All report paths are listed when complete.</li>
+        <li>When complete, select a report and open it, open its folder, or download it.</li>
       </ol>
     </div>
   </div>
@@ -1111,8 +1201,8 @@ cd Extract_spectra</pre>
   <div class="section-header">
     <div class="section-num">7</div>
     <div>
-      <h2>Output Settings</h2>
-      <div class="section-sub">Configure where results are saved</div>
+      <h2>Report &amp; Output Settings</h2>
+      <div class="section-sub">Choose what is calculated, shown, and saved</div>
     </div>
   </div>
 
@@ -1138,6 +1228,29 @@ cd Extract_spectra</pre>
     </tbody>
   </table>
   </div>
+
+  <h3>Result Report Presets</h3>
+  <div class="method-grid">
+    <div class="method-card recommended">
+      <span class="mc-tag tag-recommended">Recommended</span>
+      <h4>Quick Field QC</h4>
+      <p>RGB, NDVI, cluster map/overlay, mean and median spectra, calibration QC, and processing time. Expensive quality metrics are skipped.</p>
+    </div>
+    <div class="method-card">
+      <span class="mc-tag tag-general">Complete</span>
+      <h4>Research Standard</h4>
+      <p>Adds CIR, isolated class images, mean/median/std/IQR, NDVI/GNDVI/NDRE/PRI, cluster quality, and vegetation assessment.</p>
+    </div>
+    <div class="method-card">
+      <span class="mc-tag tag-shape">Flexible</span>
+      <h4>Custom</h4>
+      <p>Select image cards, spectral statistics, indices, HTML, CSV, standalone PNG files, and a daily batch summary.</p>
+    </div>
+  </div>
+  <div class="callout warning"><div class="callout-icon">&#x26A0;</div><div class="callout-body">
+    <strong>Vegetation indices require calibrated reflectance.</strong>
+    NDVI, GNDVI, NDRE, and PRI are calculated only when a compatible calibration profile and required wavelength bands are available. Raw DN is never silently reported as a science-ready index; the report records why an index was not calculated.
+  </div></div>
 </div>
 
 
@@ -1158,10 +1271,36 @@ cd Extract_spectra</pre>
     <li><p>Click the blue <strong>"&#x1F680; Run Analysis"</strong> button at the bottom of the sidebar.</p></li>
     <li><p>A spinner shows: <em>"Analysing… (may take several minutes for large images)"</em>. Do not close the browser tab while processing.</p></li>
     <li><p>When done, a green banner appears: <code>&#x2705; Analysis complete! · ⏱ Xs</code>. The elapsed time helps you estimate full batch duration.</p></li>
-    <li><p>The HTML report path is displayed — click or copy it to open in your browser.</p></li>
+    <li><p>In <strong>Open Recent Analysis Results</strong>, choose a report and click <strong>Open Selected HTML Report</strong>. You can also open the results folder locally or download the HTML when working on a remote server.</p></li>
     <li><p>Classification map thumbnails appear as a quick preview.</p></li>
     <li><p>The run log at the bottom of the page shows per-step timing and quality metrics.</p></li>
   </ol>
+
+  <h3>Inspecting a CERES file before full conversion</h3>
+  <ol class="steps">
+    <li><p>Choose <strong>Local Folder → Single File → Scan Folder</strong>, then select the <code>.ceres</code> file.</p></li>
+    <li><p>Click <strong>Read CERES Contents</strong>. The software scans record headers, not image pixels, and lists logical entries such as <code>A/VNIR</code>, <code>A/SWIR</code>, and <code>B/VNIR</code>. Both 2024 CBDF v1 and newer CBDF v2 layouts are recognized, and the index is cached.</p></li>
+    <li><p>Select one entry and click <strong>Quick Preview</strong>. VNIR uses visible RGB; SWIR uses 1650/1250/1050 nm false color. Only three bands are read directly from CERES, so the full hyperspectral cube is never loaded into RAM.</p></li>
+    <li><p>After confirming the acquisition, click <strong>Prepare Selected Entry</strong>. Only that sensor/segment is streamed to a uint16 BIL/HDR cache under <code>output/_ceres_cache</code> and connected to the regular analysis input.</p></li>
+    <li><p>Review the memory table for downsampling ×1/2/4/8 before running the analysis.</p></li>
+  </ol>
+  <div class="callout warn">
+    <strong>Current scope:</strong> indexed browsing, selection, low-memory preview, and selective extraction are implemented. Direct automated day-folder processing without BIL will require a later two-pass streaming classifier.
+  </div>
+
+  <h3>Separating clustering from reflectance extraction</h3>
+  <p>By default, K-Means determines spatial clusters from raw-DN spectral structure. The same masks are then applied to the calibrated cube, saving both raw-DN and reflectance CSVs. Hybrid automatically uses reflectance when valid calibration is available because its NDVI and brightness thresholds are defined on that scale.</p>
+  <p>After the run, <strong>Visual Cluster Review</strong> places the analysis RGB, cluster color map, and adjustable overlay together. Select clusters, change opacity and boundaries, then open isolated-cluster images to verify separation of leaves, shadows, bright glare, and soil.</p>
+
+  <h3 id="team-daily">Team / Plot Daily Package</h3>
+  <ol class="steps">
+    <li><p>Select <strong>Batch (all files)</strong> and open <strong>Team / Plot Daily Package</strong>.</p></li>
+    <li><p>Enter the actual acquisition date and team name. If filenames are not plot IDs, select a metadata CSV with <code>filename, plot_id, treatment, genotype, replicate, team, measurement_date</code> columns.</p></li>
+    <li><p>After analysis, use <strong>Team / Plot Daily Results</strong> to open the HTML/folder or download <code>Field_Results.xlsx</code>.</p></li>
+  </ol>
+  <p>The package combines every plot's RGB+cluster overlay, fixed <code>-1 to 1</code> NDVI tiles, and plot-level NDVI median/IQR comparison. It aggregates compact outputs without reopening the source cubes, so the additional RAM cost is small.</p>
+  <div class="callout warn"><strong>Inclusion rule:</strong> Only plots with <code>value_units=reflectance</code>, <code>calibration_qc_status=PASS</code>, and valid NDVI enter the daily aggregate. REVIEW, FAIL, and uncalibrated plots remain visible but move to Warnings. Pixels from different plots are never pooled; the plot is the statistical unit.</div>
+  <p><code>Field_Results.xlsx</code> contains Dashboard, README, Field Summary, Cluster Summary, Reflectance Spectra, and Warnings sheets.</p>
 
   <h3>Typical Processing Times</h3>
   <p>Measured on a standard laptop CPU with a 500 &times; 500 px, 200-band image:</p>
@@ -1192,11 +1331,11 @@ cd Extract_spectra</pre>
   </div>
 
   <p>After each run, a file named <code>report_YYYYMMDD_HHMMSS_<em>{method}</em>.html</code> (e.g. <code>report_20260408_130351_kmeans.html</code>) is saved in the output folder.
-  Open it in any browser (Chrome, Firefox, Edge, Safari). It is fully self-contained — no internet required.</p>
+  Open it in any browser (Chrome, Firefox, Edge, Safari). Its sections follow the selected Quick QC, Research Standard, or Custom preset; unselected cards are omitted.</p>
 
   <!-- 9.1 -->
   <h3 id="s9-overview">9.1 Image Overview</h3>
-  <p>The first card displays three side-by-side images:</p>
+  <p>The overview card displays only the images selected in the report builder:</p>
   <div class="tbl-wrap">
   <table>
     <thead><tr><th>Image</th><th>Bands used</th><th>What to look for</th></tr></thead>
@@ -1216,11 +1355,23 @@ cd Extract_spectra</pre>
         <td>All bands (output of algorithm)</td>
         <td>All classes shown at once in their assigned colours with a legend showing pixel count and percentage. First overall check of the classification result.</td>
       </tr>
+      <tr>
+        <td><strong>RGB + Cluster Overlay</strong></td>
+        <td>RGB plus semi-transparent class colours</td>
+        <td>Checks whether leaves, bright tissue, shadowed tissue, soil, and background are spatially separated as intended.</td>
+      </tr>
+      <tr>
+        <td><strong>Selected Index Maps</strong></td>
+        <td>NDVI / GNDVI / NDRE / PRI</td>
+        <td>Calculated only from calibrated reflectance with suitable wavelengths. The report lists the actual bands used.</td>
+      </tr>
     </tbody>
   </table>
   </div>
 
   <!-- 9.2 -->
+  <p><strong>Click an image to enlarge it</strong> to the browser window. Click the background/close button or press <code>Esc</code> to return. On wide screens the report uses a two-column layout so leaf, shadow, and glare boundaries remain visible.</p>
+
   <h3 id="s9-perclass">9.2 Per-Class Classification Images</h3>
   <p>One large image per class. The pixels belonging to that class are shown in the class colour; all other pixels are shown as a darkened greyscale background. This makes it easy to visually inspect each class in isolation.</p>
 
@@ -1243,7 +1394,7 @@ cd Extract_spectra</pre>
 
   <!-- 9.4 -->
   <h3 id="s9-spectra">9.4 Reflectance Spectra Chart</h3>
-  <p>An interactive Plotly chart showing the mean reflectance spectrum for each class, plotted against wavelength (nm) or band index. The shaded band around each line is &plusmn;1 standard deviation, indicating spectral variability within the class.</p>
+  <p>An interactive Plotly chart showing the selected mean and/or median spectrum for each class. The Custom/Research presets can also show &plusmn;1 standard deviation and the 25–75% IQR envelope.</p>
 
   <p>The accompanying <code>spectra_{method}.csv</code> file contains <strong>7 statistics per class per band</strong>:</p>
   <div class="tbl-wrap">
@@ -1371,6 +1522,10 @@ cd Extract_spectra</pre>
       This metric is only shown for the Hybrid and K-Means methods, and only when the image contains NIR and Red bands for NDVI computation. If the section shows "No vegetation separation data available", your image may lack the required bands.
     </div>
   </div>
+
+  <h3 id="s9-roi-qc">9.7 Raw-DN vs Calibrated-Reflectance ROI Diagnostics</h3>
+  <p>In the main app's <strong>ROI Spectrum</strong> tab, load an image, select a box/lasso/click-polygon ROI, then switch among <strong>Calibrated Reflectance</strong>, <strong>Raw DN</strong>, and <strong>Raw/Calibrated Comparison</strong>. Comparison mode uses separate left and right y-axes, so the much larger DN scale does not hide a distorted reflectance shape.</p>
+  <p>Open <strong>Calibration suspect-band and coefficient diagnostics</strong> to inspect <code>R = a &times; DN + b</code>. The table flags invalid or non-positive gains, robust gain outliers, and ROI mean reflectance outside the broad screening range &minus;0.05 to 1.20. These are review warnings only: the software does not silently rewrite calibration coefficients or delete bands.</p>
 </div>
 
 
@@ -1388,9 +1543,15 @@ cd Extract_spectra</pre>
 
   <div class="file-tree">
     <span class="dir">output/</span><br>
+    &nbsp;&nbsp;<span class="file">+-- daily_report_YYYYMMDD_HHMMSS.html</span> &nbsp;<span class="comment">← batch-level summary (when selected)</span><br>
+    &nbsp;&nbsp;<span class="file">+-- daily_summary_YYYYMMDD_HHMMSS.csv</span> &nbsp;<span class="comment">← per-file comparison table</span><br>
     &nbsp;&nbsp;<span class="dir">+-- image_filename/</span><br>
-    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- spectra_kmeans.csv</span> &nbsp;<span class="comment">← per-class spectra (7 stats); name includes method</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- spectra_kmeans_reflectance.csv</span> &nbsp;<span class="comment">← calibrated spectra</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- spectra_kmeans_raw_dn.csv</span> &nbsp;<span class="comment">← matching pre-calibration DN</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- processing_manifest.json</span> &nbsp;<span class="comment">← calibration and processing provenance</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- report_config.json</span> &nbsp;<span class="comment">← selected report preset and sections</span><br>
     &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- class_map_kmeans.png</span> &nbsp;<span class="comment">← classification map with colour legend</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- rgb.png / cluster_overlay.png / ndvi.png</span> &nbsp;<span class="comment">← selected standalone images</span><br>
     &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- report_20260408_130351_kmeans.html</span> &nbsp;<span class="comment">← full interactive HTML report</span>
   </div>
 
@@ -1402,8 +1563,33 @@ cd Extract_spectra</pre>
     <tbody>
       <tr>
         <td><code>spectra_{method}.csv</code></td>
-        <td>One row per spectral band. Seven statistics per class: <code>mean</code>, <code>std</code>, <code>median</code>, <code>q25</code>, <code>q75</code>, <code>mna</code>, <code>sam_avg</code>. Column names include filename, method, class, and statistic to support merging across files.</td>
-        <td>Open in Excel, or load with <code>pandas.read_csv()</code> in Python or <code>read.csv()</code> in R for further spectral analysis.</td>
+        <td>Main extraction from the current run, one row per band. Verify its scale in <code>value_units</code>.</td>
+        <td>Open directly in Excel or import with Python/R. Prefer the explicit reflectance file below for publication.</td>
+      </tr>
+      <tr>
+        <td><code>spectra_{method}_reflectance.csv</code></td>
+        <td>Reflectance produced when valid calibration is applied. Includes <code>mean</code>, <code>std</code>, <code>median</code>, <code>q25</code>, <code>q75</code>, <code>mna</code>, and <code>sam_avg</code> per class.</td>
+        <td>Use for science after verifying <code>value_units=reflectance</code>, <code>calibration_applied=true</code>, and <code>calibration_qc_status=PASS</code>.</td>
+      </tr>
+      <tr>
+        <td><code>spectra_{method}_raw_dn.csv</code></td>
+        <td>Original sensor DN; the paired calibration profile is recorded in <code>paired_calibration_profile</code>.</td>
+        <td>Before/after comparison and calibration diagnostics.</td>
+      </tr>
+      <tr>
+        <td><code>spectra_{method}_processed.csv</code></td>
+        <td>Normalized/processed relative values when calibration is unavailable; not absolute reflectance.</td>
+        <td>Useful for checking cluster structure, but not as publication reflectance.</td>
+      </tr>
+      <tr>
+        <td><code>daily_summary_*.csv</code></td>
+        <td>Per-file class count, NDVI, vegetation fraction, quality metrics, elapsed time, and detailed-report path.</td>
+        <td>Screen and compare one field day quickly.</td>
+      </tr>
+      <tr>
+        <td><code>all_roi_cluster_spectra*.csv</code> / <code>cluster_summary.csv</code></td>
+        <td>Combined ROI/cluster spectra plus pixel count and area fraction (<code>fraction</code>, 0–1).</td>
+        <td>Compare spectra and cluster composition among regions.</td>
       </tr>
       <tr>
         <td><code>class_map_{method}.png</code></td>
@@ -1475,7 +1661,7 @@ cd Extract_spectra</pre>
       <tr>
         <td>Port 8501 already in use</td>
         <td>Another Streamlit app is running on the same port.</td>
-        <td>Run: <code>python -m streamlit run app_unsupervised.py --server.port 8502</code></td>
+        <td>Run: <code>python -m streamlit run app.py --server.port 8502</code></td>
       </tr>
     </tbody>
   </table>

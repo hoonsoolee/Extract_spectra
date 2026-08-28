@@ -10,6 +10,8 @@ import json
 import csv
 import time
 import traceback
+import math
+from copy import deepcopy
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
@@ -48,6 +50,8 @@ class Pipeline:
         _lang = config.get("report", {}).get("lang", "ko")
         self.reporter = Reporter(config, lang=_lang)
         self.batch_summaries: List[dict] = []
+        self.team_packages: List[dict] = []
+        self.last_cluster_input_space = "processed"
 
         out_cfg = config.get("output", {})
         self.output_dir = Path(out_cfg.get("dir", "./output"))
@@ -77,6 +81,7 @@ class Pipeline:
         out_cfg  = self.config.get("output", {})
         per_file_report = out_cfg.get("per_file_report", False)
         self.batch_summaries = []
+        self.team_packages = []
         self.reporter.results.clear()
 
         # ── File discovery ─────────────────────────────────────────
@@ -167,14 +172,34 @@ class Pipeline:
             html_path = self.output_dir / f"daily_report_{ts}.html"
             columns = [
                 "filename", "source_file", "value_units", "calibration_profile",
-                "n_classes", "ndvi_mean", "ndvi_median", "vegetation_fraction",
-                "silhouette", "davies_bouldin", "elapsed_seconds", "detail_report",
+                "calibration_qc_status", "n_classes", "ndvi_mean", "ndvi_median",
+                "ndvi_q25", "ndvi_q75", "vegetation_fraction", "silhouette",
+                "davies_bouldin", "elapsed_seconds", "detail_report",
             ]
             with csv_path.open("w", newline="", encoding="utf-8-sig") as stream:
                 writer = csv.DictWriter(stream, fieldnames=columns, extrasaction="ignore")
                 writer.writeheader()
                 writer.writerows(self.batch_summaries)
             self.reporter.render_daily_summary(self.batch_summaries, html_path)
+
+        team_config = self.config.get("report", {}).get("team_daily", {})
+        if (
+            not single_file
+            and self.batch_summaries
+            and team_config.get("enabled", False)
+        ):
+            try:
+                from .team_report import generate_team_daily_packages
+
+                self.team_packages = generate_team_daily_packages(
+                    self.batch_summaries,
+                    self.output_dir,
+                    team_config,
+                )
+            except Exception:
+                logger.error(
+                    "Team/day report generation failed\n%s", traceback.format_exc()
+                )
 
     # ============================================================
     # Process a single file
@@ -217,7 +242,50 @@ class Pipeline:
 
         # ---- 3. Classify ----
         t0 = time.time()
-        class_map, class_info = self.clf.classify(data, wavelengths, labels_csv)
+        method = str(
+            self.config.get("classification", {}).get("method", "kmeans")
+        ).lower()
+        requested_cluster_space = str(
+            self.config.get("classification", {}).get("input_space", "auto")
+        ).lower()
+        if requested_cluster_space not in {"auto", "raw", "reflectance"}:
+            requested_cluster_space = "auto"
+
+        # Simple/reproducible default: use scene-independent raw spectral
+        # structure for clustering, then apply the resulting masks to the
+        # calibrated cube for science-ready spectra and indices. Hybrid is the
+        # exception because its published thresholds are defined on NDVI and
+        # reflectance brightness; when calibration is available it uses it.
+        use_reflectance = requested_cluster_space == "reflectance" or (
+            requested_cluster_space == "auto"
+            and method == "hybrid"
+            and self.prep.last_calibration_info is not None
+        )
+        if use_reflectance:
+            cluster_data, cluster_wavelengths = data, wavelengths
+            self.last_cluster_input_space = (
+                "reflectance" if self.prep.last_calibration_info else "processed"
+            )
+        else:
+            cluster_config = deepcopy(self.config)
+            cluster_preprocessing = cluster_config.setdefault("preprocessing", {})
+            cluster_preprocessing["calibration_file"] = None
+            cluster_preprocessing["auto_discover_calibration"] = False
+            cluster_preprocessing["normalize"] = True
+            cluster_preprocessing["normalize_mode"] = "global"
+            cluster_preprocessing["spatial_downsample"] = 1
+            cluster_preprocessor = Preprocessor(cluster_config)
+            cluster_data, cluster_wavelengths = cluster_preprocessor.process(
+                raw_data,
+                raw_wavelengths,
+                skip_downsample=True,
+                source_path=str(file_ref),
+            )
+            self.last_cluster_input_space = "raw DN (global scale)"
+        logger.info(f"  Clustering input: {self.last_cluster_input_space}")
+        class_map, class_info = self.clf.classify(
+            cluster_data, cluster_wavelengths, labels_csv
+        )
         logger.info(f"  Classify: {time.time()-t0:.2f}s")
 
         # ---- 3b. Quality metrics ----
@@ -225,7 +293,7 @@ class Pipeline:
         report_sections = self.reporter.options["sections"]
         metrics: Dict[str, Any] = {}
         if report_sections.get("quality_metrics"):
-            metrics = Evaluator.unsupervised_metrics(data, class_map)
+            metrics = Evaluator.unsupervised_metrics(cluster_data, class_map)
             sil = metrics.get("silhouette")
             sil_str = f"{sil:.3f}" if sil is not None else "N/A"
             logger.info(
@@ -346,6 +414,7 @@ class Pipeline:
             "source_file": str(Path(file_ref).resolve()) if source == "local" else str(file_ref),
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "method": method,
+            "clustering_input": self.last_cluster_input_space,
             "normalization": self.prep.last_effective_normalize_mode,
             "requested_normalization": self.config.get("preprocessing", {}).get("normalize_mode", "global"),
             "calibration": self.prep.last_calibration_info,
@@ -393,6 +462,19 @@ class Pipeline:
                 file_out_dir / f"class_map_{method}.png"
             )
 
+        cluster_review_assets = []
+        team_daily_enabled = bool(
+            self.config.get("report", {}).get("team_daily", {}).get("enabled", False)
+        )
+        if out_cfg.get("save_cluster_review", True) or team_daily_enabled:
+            cluster_review_assets = self._save_cluster_review_assets(
+                file_out_dir,
+                data,
+                wavelengths,
+                class_map,
+                class_info,
+            )
+
         report_assets = self.reporter.save_selected_assets(
             file_out_dir,
             data=data,
@@ -401,7 +483,21 @@ class Pipeline:
             wavelengths=wavelengths,
             index_results=index_results,
         )
+        team_ndvi_path = ""
+        ndvi_values = (index_results.get("NDVI") or {}).get("values")
+        if team_daily_enabled and ndvi_values is not None:
+            from PIL import Image
+            import numpy as np
+
+            team_ndvi_target = file_out_dir / "team_ndvi.png"
+            team_ndvi_rgb = self.reporter._index_map_array(ndvi_values)
+            Image.fromarray(
+                np.round(np.clip(team_ndvi_rgb, 0.0, 1.0) * 255.0).astype(np.uint8),
+                mode="RGB",
+            ).save(team_ndvi_target)
+            team_ndvi_path = str(team_ndvi_target.resolve())
         manifest["report_assets"] = report_assets
+        manifest["cluster_review_assets"] = cluster_review_assets
 
         # ---- 6. Add to report ----
         elapsed_sec = time.time() - t_file
@@ -430,22 +526,57 @@ class Pipeline:
 
         logger.info(f"  Outputs saved to: {file_out_dir}")
         calibration_info = self.prep.last_calibration_info or {}
+        calibration_meta = calibration_info.get("meta") or {}
+        calibration_qc_status = str(
+            calibration_meta.get("qc_status") or "UNASSESSED"
+        ).upper()
         ndvi = index_results.get("NDVI") or {}
         ndvi_summary = ndvi.get("summary") or {}
         profile = calibration_info.get("selected_profile") or ""
+        science_ready = (
+            manifest["value_units"] == "reflectance"
+            and calibration_qc_status == "PASS"
+        )
+        overlay_image = next(
+            (
+                path for path in cluster_review_assets
+                if Path(path).name == "cluster_review_overlay.png"
+            ),
+            "",
+        )
         return {
             "filename": fname,
             "source_file": str(Path(file_ref).resolve()) if source == "local" else str(file_ref),
             "value_units": manifest["value_units"],
             "calibration_profile": Path(str(profile)).name if profile else "",
+            "calibration_qc_status": calibration_qc_status,
             "n_classes": len(class_info),
             "ndvi_mean": ndvi_summary.get("mean", ""),
             "ndvi_median": ndvi_summary.get("median", ""),
+            "ndvi_q25": ndvi_summary.get("q25", ""),
+            "ndvi_q75": ndvi_summary.get("q75", ""),
             "vegetation_fraction": ndvi_summary.get("fraction_above_0_15", ""),
             "silhouette": metrics.get("silhouette", "") if metrics else "",
             "davies_bouldin": metrics.get("davies_bouldin", "") if metrics else "",
             "elapsed_seconds": elapsed_sec,
             "detail_report": "",
+            "result_dir": str(file_out_dir.resolve()),
+            "overlay_image": overlay_image,
+            "ndvi_image": team_ndvi_path,
+            "cluster_summary": [
+                {
+                    "class_id": int(item.get("id", index)),
+                    "class_name": str(item.get("name", f"Cluster {index}")),
+                    "pixel_count": int(item.get("n_pixels", 0)),
+                }
+                for index, item in enumerate(class_info)
+            ],
+            "team_spectra": (
+                self._team_spectra_payload(spectra) if science_ready else []
+            ),
+            "cluster_review_file": str(
+                (file_out_dir / "cluster_review.npz").resolve()
+            ) if cluster_review_assets else "",
         }
 
     # ============================================================
@@ -515,3 +646,74 @@ class Pipeline:
         fig.savefig(str(path), dpi=100, bbox_inches="tight")
         plt.close(fig)
         logger.info(f"  Class map saved: {path.name}")
+
+    def _save_cluster_review_assets(
+        self,
+        output_dir: Path,
+        data,
+        wavelengths,
+        class_map,
+        class_info,
+    ) -> list[str]:
+        """Persist the arrays needed for an interactive visual cluster audit."""
+        import numpy as np
+        from PIL import Image
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        rgb = self.reporter._get_rgb_array(data, wavelengths, "rgb")
+        color_map = self.reporter._make_class_map_array(class_map, class_info)
+        overlay = self.reporter._make_cluster_overlay_array(
+            rgb, class_map, class_info, alpha=0.55
+        )
+
+        def save_rgb(name: str, values) -> Path:
+            target = output_dir / name
+            encoded = np.round(np.clip(values, 0.0, 1.0) * 255.0).astype(np.uint8)
+            Image.fromarray(encoded, mode="RGB").save(target)
+            return target
+
+        rgb_path = save_rgb("cluster_review_rgb.png", rgb)
+        map_path = save_rgb("cluster_review_map.png", color_map)
+        overlay_path = save_rgb("cluster_review_overlay.png", overlay)
+        archive_path = output_dir / "cluster_review.npz"
+        np.savez_compressed(
+            archive_path,
+            class_map=np.asarray(class_map, dtype=np.int32),
+            class_ids=np.asarray([item["id"] for item in class_info], dtype=np.int32),
+            class_names=np.asarray([str(item["name"]) for item in class_info]),
+            class_colors=np.asarray([item["color"] for item in class_info], dtype=np.uint8),
+        )
+        logger.info("  Interactive cluster review assets saved")
+        return [
+            str(path.resolve())
+            for path in (rgb_path, map_path, overlay_path, archive_path)
+        ]
+
+    @staticmethod
+    def _team_spectra_payload(spectra: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Keep a compact JSON-safe subset for the team/day workbook."""
+
+        def values(array) -> list[float | None]:
+            result: list[float | None] = []
+            for item in array if array is not None else []:
+                try:
+                    number = float(item)
+                except (TypeError, ValueError):
+                    result.append(None)
+                    continue
+                result.append(number if math.isfinite(number) else None)
+            return result
+
+        payload: List[Dict[str, Any]] = []
+        for index, item in enumerate(spectra):
+            payload.append({
+                "class_id": int(item.get("id", index)),
+                "class_name": str(item.get("name", f"Cluster {index}")),
+                "pixel_count": int(item.get("n_pixels", 0)),
+                "wavelengths": values(item.get("wavelengths")),
+                "mean": values(item.get("mean")),
+                "median": values(item.get("median")),
+                "q25": values(item.get("q25")),
+                "q75": values(item.get("q75")),
+            })
+        return payload
