@@ -268,6 +268,7 @@ pre code { background: none; color: inherit; padding: 0; }
 <nav class="toc-sidebar">
   <h3>목차</h3>
   <ul>
+    <li><a href="quick_start_ko.html">한국어 실전 빠른 사용법 ↗</a></li>
     <li><a href="#cover">개요</a></li>
     <li><a href="#s1">1. 설치 방법</a></li>
     <li><a href="#s2">2. 앱 실행</a></li>
@@ -330,8 +331,9 @@ pre code { background: none; color: inherit; padding: 0; }
     <div class="feature-pill">&#x1F4C8; 원본 DN·보정 반사율 CSV</div>
   </div>
   <div class="meta">
+    처음 사용하나요? <a href="quick_start_ko.html">한국어 실전 빠른 사용법 열기</a><br>
     GitHub: <a href="https://github.com/hoonsoolee/Extract_spectra">https://github.com/hoonsoolee/Extract_spectra</a>
-    &nbsp;&nbsp;|&nbsp;&nbsp; Python 3.9 이상 &nbsp;|&nbsp; Windows / macOS / Linux &nbsp;|&nbsp; 2026년 8월 25일 업데이트
+    &nbsp;&nbsp;|&nbsp;&nbsp; Python 3.9 이상 &nbsp;|&nbsp; Windows / macOS / Linux &nbsp;|&nbsp; 2026년 8월 30일 업데이트
   </div>
 </div>
 
@@ -1149,7 +1151,8 @@ cd Extract_spectra</pre>
   <ol class="steps">
     <li><p>사이드바에서 데이터 소스, 처리 모드, 분류 방법, 파라미터, 출력 폴더를 모두 설정합니다.</p></li>
     <li><p>사이드바 하단의 파란색 <strong>"&#x1F680; 분석 시작"</strong> 버튼을 클릭합니다.</p></li>
-    <li><p><em>"⏳ 분석 중... (데이터 크기에 따라 수 분이 걸릴 수 있습니다)"</em> 스피너가 표시됩니다. 처리 중에는 브라우저 탭을 닫지 마세요.</p></li>
+    <li><p>분석은 별도 작업 프로세스에서 실행되며 경과 시간과 최근 로그가 약 2초마다 갱신됩니다. 중단하려면 사이드바 또는 분석 상태 영역의 <strong>"⏹️ 실행 중지"</strong>를 누르세요. 해당 분석 작업과 하위 프로세스만 종료됩니다.</p></li>
+    <li><p>중지 전에 완성된 파일은 결과 폴더에 남습니다. 중지 시점에 작성 중이던 파일은 최종 결과로 간주하지 말고 다음 실행에서 다시 생성하세요.</p></li>
     <li><p>완료되면 녹색 배너가 나타납니다: <code>✅ 분석 완료! · ⏱ X초</code>. 소요 시간으로 전체 배치 예상 시간을 가늠할 수 있습니다.</p></li>
     <li><p><strong>최근 분석 결과 열기</strong>에서 리포트를 선택하고 <strong>🌐 선택한 HTML 리포트 열기</strong>를 누르면 기본 브라우저에서 바로 열립니다. <strong>📂 결과 폴더 열기</strong>는 Windows 파일 탐색기를 열고, <strong>⬇️ HTML 리포트 다운로드</strong>는 원격 서버에서도 사용할 수 있습니다.</p></li>
     <li><p>분류 맵 썸네일이 빠른 미리보기로 표시됩니다.</p></li>

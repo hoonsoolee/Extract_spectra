@@ -57,6 +57,11 @@ clustering, and reports cannot drift between languages.
 
 ## Documentation
 
+- [Practical English quick start](quick_start_en.html) — click-by-click CERES,
+  ROI spectra, clustering, calibration, and result examples
+- [Practical English quick start (Markdown)](QUICK_START_EN.md)
+- [한국어 실전 빠른 사용법](quick_start_ko.html)
+- [한국어 실전 빠른 사용법 (Markdown)](QUICK_START_KO.md)
 - [English usage guide](USAGE_EN.md)
 - [Korean usage guide](USAGE_KO.md)
 - [Release notes](CHANGELOG.md)

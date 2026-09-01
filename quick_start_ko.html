@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>실전 빠른 사용법 — 초분광 필드 분석</title>
+<style>
+  :root{--ink:#18302b;--muted:#64746f;--green:#176b55;--green2:#e8f4ef;--blue:#205c8f;--blue2:#eaf3fb;--amber:#a66200;--amber2:#fff4dc;--red:#a43b3b;--red2:#fff0f0;--line:#dce7e2;--paper:#fff;--back:#f3f7f5;--code:#13231f}
+  *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--back);color:var(--ink);font:15px/1.68 "Segoe UI","Malgun Gothic",Arial,sans-serif;word-break:keep-all}a{color:var(--green);font-weight:650;text-decoration:none}a:hover{text-decoration:underline}
+  .layout{display:grid;grid-template-columns:250px minmax(0,900px);gap:28px;max-width:1210px;margin:auto;padding:28px}nav{position:sticky;top:20px;align-self:start;background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:0 8px 24px rgba(25,62,50,.07)}nav .brand{font-weight:800;color:var(--green);font-size:17px;margin-bottom:4px}nav .small{color:var(--muted);font-size:12px;margin-bottom:16px}nav a{display:block;padding:8px 10px;border-radius:9px;color:#3e514b;font-size:13px}nav a:hover{background:var(--green2);text-decoration:none}nav .tools{border-top:1px solid var(--line);margin-top:14px;padding-top:14px}main{min-width:0}
+  .hero{background:linear-gradient(125deg,#143d34,#237d62);color:#fff;border-radius:22px;padding:42px;margin-bottom:22px;box-shadow:0 16px 40px rgba(20,61,52,.16)}.eyebrow{text-transform:uppercase;letter-spacing:.1em;font-weight:800;font-size:11px;color:#bde5d7}h1{font-size:38px;line-height:1.2;margin:10px 0 14px}.hero p{max-width:720px;color:#def1ea;margin:0}.hero .meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:24px}.pill{background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.2);border-radius:999px;padding:6px 11px;font-size:12px}
+  section{background:var(--paper);border:1px solid var(--line);border-radius:18px;padding:30px 34px;margin:0 0 20px;box-shadow:0 7px 22px rgba(25,62,50,.05)}h2{font-size:25px;line-height:1.32;margin:0 0 8px}h3{font-size:17px;margin:25px 0 9px;color:var(--green)}p{margin:8px 0 13px}ul,ol{padding-left:24px}li{margin:7px 0}.section-kicker{color:var(--green);font-size:12px;font-weight:850;letter-spacing:.06em;margin-bottom:6px}
+  .flow{display:flex;align-items:center;gap:7px;flex-wrap:wrap;background:#f7faf8;border:1px solid var(--line);border-radius:13px;padding:14px;margin:16px 0}.flow span{background:#fff;border:1px solid #bdd5cb;border-radius:9px;padding:7px 10px;font-weight:700;font-size:13px}.flow b{color:#80a397}.callout{border-radius:12px;padding:14px 16px;margin:16px 0;border-left:4px solid}.info{background:var(--blue2);border-color:var(--blue)}.warn{background:var(--amber2);border-color:var(--amber)}.danger{background:var(--red2);border-color:var(--red)}.good{background:var(--green2);border-color:var(--green)}
+  pre{background:var(--code);color:#e4f4ee;border-radius:12px;padding:15px 17px;overflow:auto;font:13px/1.55 Consolas,"Courier New",monospace;margin:12px 0;word-break:normal}code{font-family:Consolas,"Courier New",monospace;background:#edf3f0;border-radius:5px;padding:1px 5px;color:#21493e;word-break:break-all}pre code{background:none;color:inherit;padding:0;word-break:normal}table{border-collapse:separate;border-spacing:0;width:100%;margin:14px 0;border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:13px}th{background:#edf5f1;text-align:left;color:#21493e}th,td{padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top}tr:last-child td{border-bottom:0}
+  .cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:16px 0}.card{border:1px solid var(--line);border-radius:12px;padding:15px}.card strong{display:block;color:var(--green);margin-bottom:4px}.check{list-style:none;padding:0}.check li{position:relative;padding-left:27px}.check li:before{content:"✓";position:absolute;left:0;top:0;color:var(--green);font-weight:900}.top-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:18px}.button{display:inline-block;padding:9px 13px;border-radius:10px;background:#fff;color:var(--green);border:1px solid #fff;font-size:13px;font-weight:800}.button.secondary{background:transparent;color:#fff;border-color:rgba(255,255,255,.4)}footer{color:var(--muted);font-size:12px;text-align:center;padding:10px 0 30px}
+  @media(max-width:850px){body{word-break:normal}.layout{display:block;padding:14px}nav{position:relative;top:auto;margin-bottom:14px}nav .links{display:grid;grid-template-columns:repeat(2,1fr)}.hero{padding:30px 24px}h1{font-size:31px}section{padding:24px 20px}.cards{grid-template-columns:1fr}table{table-layout:fixed;max-width:100%}th,td{overflow-wrap:anywhere}code{overflow-wrap:anywhere;word-break:break-word}pre code{overflow-wrap:normal;word-break:normal}}
+  @media print{body{background:#fff}.layout{display:block;max-width:none;padding:0}nav,.top-actions{display:none}.hero,section{box-shadow:none;break-inside:avoid}.hero{border-radius:0}section{border-radius:0;margin:0 0 12px}a{color:inherit}}
+</style>
+</head>
+<body>
+<div class="layout">
+  <nav aria-label="빠른 사용법 목차">
+    <div class="brand">실전 빠른 사용법</div><div class="small">한국어 · 필드/실험실 워크플로</div>
+    <div class="links"><a href="#start">0. 프로그램 실행</a><a href="#ceres">1. CERES 사용</a><a href="#spectra">2. 스펙트럼 확인</a><a href="#cluster">3. 클러스터링 점검</a><a href="#calibration">4. 보정파일 만들기</a><a href="#results">5. 저장 결과 설명</a><a href="#problems">자주 생기는 문제</a></div>
+    <div class="tools"><a href="manual_ko.html">전체 한글 설명서 열기 ↗</a><a href="QUICK_START_KO.md">Markdown 버전 열기 ↗</a><a href="quick_start_en.html">English version ↗</a></div>
+  </nav>
+  <main>
+    <header class="hero">
+      <div class="eyebrow">처음 사용자를 위한 따라 하기</div><h1>초분광 필드 분석<br>실전 빠른 사용법</h1>
+      <p>CERES 항목 준비, BIL 스펙트럼 확인, 클러스터링 검수, White/Dark 반사율 보정과 결과 전달까지 실제 버튼 순서대로 설명합니다.</p>
+      <div class="meta"><span class="pill">CERES / CBDF</span><span class="pill">ENVI BIL/HDR</span><span class="pill">ROI 스펙트럼</span><span class="pill">반사율 QC</span><span class="pill">HTML + CSV + Excel</span></div>
+      <div class="top-actions"><a class="button" href="#ceres">CERES부터 시작</a><a class="button secondary" href="#calibration">보정파일 만들기</a><button class="button secondary" onclick="window.print()">인쇄하기</button></div>
+    </header>
+
+    <section id="start"><div class="section-kicker">0단계</div><h2>한국어 프로그램 실행</h2>
+      <pre><code>cd D:\Research\Hyperspectral\Extract_Spectra_v2
+python -m streamlit run app.py</code></pre><p>브라우저는 보통 <code>http://localhost:8501</code>에서 자동으로 열립니다.</p>
+      <ul class="check"><li>ENVI 헤더와 바이너리를 같은 폴더에 둡니다.</li><li>첫 확인은 공간 다운샘플링 4를 사용합니다.</li><li>전체 배치 전에 단일 파일을 시험합니다.</li><li>Raw DN은 반사율이 아니라는 점을 기억합니다.</li></ul>
+    </section>
+
+    <section id="ceres"><div class="section-kicker">작업 1</div><h2>CERES 파일 하나를 준비하고 분석하기</h2><p><strong>예시:</strong> <code>D:\FieldData\2026-08-21\Plot_001.ceres</code></p>
+      <div class="flow" aria-label="CERES 버튼 순서"><span>로컬 폴더</span><b>→</b><span>단일 파일 선택</span><b>→</b><span>폴더 스캔</span><b>→</b><span>Plot_001.ceres</span><b>→</b><span>내부 목록 읽기</span><b>→</b><span>A / VNIR 선택</span><b>→</b><span>빠른 미리보기</span><b>→</b><span>선택 항목 분석 준비</span></div>
+      <ol><li><strong>CERES 내부 목록 읽기</strong>는 영상 전체가 아니라 레코드 헤더만 읽습니다.</li><li>원하는 촬영 구간과 센서(VNIR/SWIR)를 선택합니다.</li><li><strong>빠른 미리보기</strong>로 선택한 영상이 맞는지 확인합니다.</li><li><strong>선택 항목 분석 준비</strong>를 누르면 해당 항목만 <code>output/_ceres_cache/</code>의 uint16 BIL/HDR로 변환됩니다.</li><li>초록색 연결 메시지를 확인한 뒤 설정을 고르고 <strong>분석 시작</strong>을 누릅니다.</li></ol>
+      <div class="callout warn"><strong>현재 범위:</strong> CERES 내부의 선택한 항목 하나씩 안전하게 준비합니다. 여러 CERES의 모든 내부 항목을 한 번에 자동 추출하는 기능은 아직 구현 전입니다. 전체 배치는 미리 준비된 BIL/HDR을 대상으로 실행하세요.</div>
+      <div class="callout info"><strong>용량 확인:</strong> 준비 전에 화면에 선택 BIL 용량과 예상 피크 RAM이 표시됩니다. 캐시 BIL은 원본 CERES보다 커질 수 있습니다.</div>
+    </section>
+
+    <section id="spectra"><div class="section-kicker">작업 2</div><h2>BIL을 불러와 스펙트럼 확인하기</h2>
+      <pre><code>D:\FieldData\Plot_001.bil
+D:\FieldData\Plot_001.bil.hdr</code></pre><p>두 파일을 같은 폴더에 두고 폴더 스캔에서는 작은 <code>.hdr</code>를 선택합니다.</p>
+      <div class="flow"><span>ROI 스펙트럼</span><b>→</b><span>파일 선택</span><b>→</b><span>다운샘플 ×4</span><b>→</b><span>로드</span><b>→</b><span>확대</span><b>→</b><span>Box / Lasso / Polygon</span><b>→</b><span>CSV 저장</span></div>
+      <ol><li><strong>ROI 스펙트럼</strong> 탭에서 파일을 선택하거나 직접 경로를 입력합니다.</li><li>처음에는 다운샘플 4로 로드합니다.</li><li>배너에서 <strong>반사율 보정 적용됨</strong>인지 <strong>원본 DN</strong>인지 확인합니다.</li><li>필요하면 확대하고 Box, Lasso 또는 클릭 Polygon으로 잎/플랏 ROI를 지정합니다.</li><li>평균·중앙값·변동성과 파장/Y축 범위를 확인합니다.</li><li>보정이 있으면 <strong>보정 반사율 / 원본 DN / 원본·보정 비교</strong>를 전환합니다.</li><li>저장 경로를 정하고 <strong>CSV 저장</strong>을 누릅니다.</li></ol>
+      <div class="callout good"><strong>잎 스펙트럼 예:</strong> 건강한 녹색 잎은 보통 660 nm 부근이 낮고 NIR로 가면서 크게 상승합니다. 갑작스러운 계단, 1을 크게 넘는 값 또는 센서 경계의 불연속은 평활화보다 보정 QC를 먼저 점검하세요.</div>
+    </section>
+
+    <section id="cluster"><div class="section-kicker">작업 3</div><h2>클러스터링을 제대로 설정하고 검수하기</h2>
+      <div class="cards"><div class="card"><strong>첫 시험 설정</strong>단일 파일 · 다운샘플 4 · K-Means · 6개 클러스터 · 빠른 필드 QC</div><div class="card"><strong>최종 설정</strong>미리보기에서 검수한 설정을 그대로 쓰고, 필요할 때만 해상도를 올립니다.</div></div>
+      <p>K-Means는 VNIR/SWIR 모두에 사용할 수 있어 첫 확인에 편합니다. 기본은 원본 DN 구조로 클러스터를 만들고 같은 마스크로 반사율 스펙트럼을 추출합니다. Hybrid는 NDVI와 밝기 임계값 때문에 유효한 보정이 있으면 반사율을 사용합니다.</p>
+      <h3>이미지상에서 반드시 확인</h3><p><strong>클러스터링 결과 이미지 검수</strong>에서 RGB, 컬러맵, 투명도 조절 오버레이, 경계선과 클러스터별 단독 이미지를 비교합니다. 번호 자체에는 생물학적 의미가 없으므로 위치와 스펙트럼을 함께 해석합니다.</p>
+      <table><thead><tr><th>화면 문제</th><th>먼저 바꿔볼 것</th></tr></thead><tbody><tr><td>잎이 너무 잘게 나뉨</td><td>클러스터 수를 줄입니다.</td></tr><tr><td>밝은 잎과 그림자 잎이 합쳐짐</td><td>클러스터를 늘리거나 Hybrid 밝기값을 조절합니다.</td></tr><tr><td>VNIR에서 토양·식생이 합쳐짐</td><td>Hybrid와 NDVI 임계값을 시험합니다.</td></tr><tr><td>SWIR에 red/NIR이 없음</td><td>Hybrid 대신 K-Means 또는 SAM을 사용합니다.</td></tr><tr><td>특정 플랏만 결과가 나쁨</td><td>ROI 구역 분석·재클러스터링으로 그 ROI만 다시 시험합니다.</td></tr><tr><td>과반사/패널이 포화됨</td><td>촬영 또는 마스크를 수정합니다. 클러스터링은 소실 신호를 복원하지 못합니다.</td></tr></tbody></table>
+      <div class="callout info"><strong>채택 기준:</strong> 컬러맵이 예쁜지만 보지 말고 클러스터 위치·면적, 경계, 스펙트럼과 유사 플랏에서의 반복성을 확인하세요.</div>
+    </section>
+
+    <section id="calibration"><div class="section-kicker">작업 4</div><h2>White/Dark 반사율 보정파일 만들기</h2><p>여기서 White balance는 RGB 색감이 아니라 파장별 empirical-line 반사율 보정입니다.</p>
+      <pre><code>Reflectance = a(파장) × DN + b(파장)</code></pre>
+      <h3>같은 조건의 자료 준비</h3><ul><li>작물 촬영시간과 가까운 패널 영상</li><li>인증 반사율 <code>0.99</code>, <code>0.50</code>, <code>0.25</code> 등</li><li>렌즈 덮개/셔터를 닫고 획득한 Sensor Dark</li><li>같은 센서·밴드·integration time·gain</li></ul>
+      <div class="flow"><span>패널 보정</span><b>→</b><span>패널 영상 로드</span><b>→</b><span>깨끗한 패널 ROI</span><b>→</b><span>0.99 / 0.50 / 0.25 입력</span><b>→</b><span>패널로 추가</span><b>→</b><span>Dark 로드</span><b>→</b><span>자동 보정 계산</span></div>
+      <ol><li><strong>패널 보정</strong>에서 reference 영상을 로드합니다.</li><li>패널 가장자리·그림자·먼지·glare를 피해 균일한 안쪽을 선택합니다.</li><li>인증값을 소수로 입력하고 <strong>이 영역을 패널로 추가</strong>합니다.</li><li><strong>실측 Dark 파일</strong>을 선택해 <strong>Dark 로드</strong>합니다. 상수 100 DN은 빠른 점검용입니다.</li><li><strong>자동 반사율 보정 계산</strong>을 누릅니다.</li><li>패널 복원, 파장별 가중치, 포화/무효 밴드와 QC를 확인합니다.</li></ol>
+      <div class="callout info"><strong>다중 패널 원칙:</strong> 50% 패널은 0.50 그대로 사용합니다. 99% 패널이 일부 파장에서 포화되면 그 구간의 가중치는 0이 되고 유효한 낮은 반사율 패널이 대신 사용될 수 있습니다.</div>
+      <table><thead><tr><th>QC</th><th>프로그램 동작</th><th>사용자 판단</th></tr></thead><tbody><tr><td><strong>PASS</strong></td><td>자동 연결</td><td>그래프 확인 후 분석 사용</td></tr><tr><td><strong>REVIEW</strong></td><td>경고와 함께 시험 연결</td><td>논문용 사용 전 복원·의심 밴드 검토</td></tr><tr><td><strong>FAIL</strong></td><td>감사용 저장, 전체 분석 자동 적용 차단</td><td>패널 ROI/Dark를 다시 정하고 재생성</td></tr></tbody></table>
+      <pre><code>output/calibration/&lt;패널영상명&gt;_weighted_dark_calibration.npz</code></pre><p>QC가 허용하면 즉시 연결되고, 다음 실행에서는 원본 폴더와 <code>output/calibration/</code>에서 자동 탐색합니다. 작물 영상 로드 후 초록색 배너와 다음 값을 확인합니다.</p>
+      <pre><code>value_units = reflectance
+calibration_applied = true
+calibration_qc_status = PASS
+normalization_mode = none</code></pre>
+    </section>
+
+    <section id="results"><div class="section-kicker">작업 5</div><h2>저장 결과 이해하고 전달하기</h2>
+      <pre><code>output/&lt;원본파일명&gt;/
+|-- report_&lt;시간&gt;_&lt;방법&gt;.html
+|-- spectra_&lt;방법&gt;_reflectance.csv
+|-- spectra_&lt;방법&gt;_raw_dn.csv
+|-- spectra_&lt;방법&gt;_processed.csv
+|-- processing_manifest.json
+|-- report_config.json
+|-- rgb.png / ndvi.png
+|-- class_map_&lt;방법&gt;.png
+`-- cluster_map.png / cluster_overlay.png</code></pre>
+      <table><thead><tr><th>결과</th><th>주요 용도</th></tr></thead><tbody><tr><td><code>report_*.html</code></td><td>연구팀이 가장 쉽게 보는 이미지·스펙트럼·QC 리포트</td></tr><tr><td><code>spectra_*_reflectance.csv</code></td><td>PASS 확인 후 과학 분석에 사용할 반사율</td></tr><tr><td><code>spectra_*_raw_dn.csv</code></td><td>촬영과 보정 전후 문제 진단</td></tr><tr><td><code>spectra_*_processed.csv</code></td><td>상대/정규화 탐색값. 절대 반사율 아님</td></tr><tr><td><code>processing_manifest.json</code></td><td>원본·보정·정규화·방법·설정의 재현 기록</td></tr><tr><td>클러스터맵·오버레이</td><td>클러스터링의 공간적 타당성 검수</td></tr><tr><td><code>daily_report_*.html</code> / <code>daily_summary_*.csv</code></td><td>배치 전체 비교</td></tr><tr><td><code>Field_Results.xlsx</code></td><td>팀/측정일 대시보드, 필드 요약, 스펙트럼과 경고</td></tr></tbody></table>
+      <h3>연구팀 전달 권장 묶음</h3><ol><li>파일별 또는 팀별 HTML 리포트</li><li>일일 배치의 <code>Field_Results.xlsx</code></li><li>통계용 보정 반사율 CSV</li><li>재현성 기록 <code>processing_manifest.json</code></li></ol>
+      <ul class="check"><li>보정 QC가 PASS입니다.</li><li>단위가 Raw DN이 아니라 Reflectance입니다.</li><li>요청한 식생지수가 실제 계산되었습니다.</li><li>클러스터 오버레이가 의미 있는 영역과 맞습니다.</li><li>설명되지 않는 파장 점프·포화 경고가 없습니다.</li></ul>
+    </section>
+
+    <section id="problems"><div class="section-kicker">빠른 문제 해결</div><h2>자주 생기는 문제</h2>
+      <table><thead><tr><th>증상</th><th>확인할 것</th></tr></thead><tbody><tr><td>ENVI/BIL이 열리지 않음</td><td>바이너리와 <code>.hdr</code>를 같은 폴더에 두고 헤더를 선택합니다.</td></tr><tr><td>CERES 분석 시작 불가</td><td>내부 항목 선택 후 <strong>선택 항목 분석 준비</strong>를 실행합니다.</td></tr><tr><td>반사율 배너가 없음</td><td>보정파일 없음, 비호환 또는 QC FAIL을 확인합니다.</td></tr><tr><td>NDVI 계산 불가</td><td>보정된 red와 NIR 파장이 모두 있는지 확인합니다.</td></tr><tr><td>스펙트럼이 계단처럼 뜀</td><td>패널 가중치, 포화, 센서 경계와 보정 QC를 확인합니다.</td></tr><tr><td>분석이 너무 오래 걸림</td><td>다운샘플 4, 단일 파일 시험 또는 <strong>실행 중지</strong>를 사용합니다.</td></tr></tbody></table>
+      <div class="callout good">알고리즘과 CSV 전체 설명이 필요하면 <a href="manual_ko.html">전체 한글 설명서</a>를 확인하세요.</div>
+    </section>
+    <footer>초분광 노지 작물 분석 · 한국어 실전 빠른 사용법</footer>
+  </main>
+</div>
+</body>
+</html>

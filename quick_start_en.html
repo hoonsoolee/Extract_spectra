@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Practical Quick Start — Hyperspectral Field Analysis</title>
+<style>
+  :root {
+    --ink:#18302b; --muted:#64746f; --green:#176b55; --green2:#e8f4ef;
+    --blue:#205c8f; --blue2:#eaf3fb; --amber:#a66200; --amber2:#fff4dc;
+    --red:#a43b3b; --red2:#fff0f0; --line:#dce7e2; --paper:#fff;
+    --back:#f3f7f5; --code:#13231f;
+  }
+  *{box-sizing:border-box} html{scroll-behavior:smooth}
+  body{margin:0;background:var(--back);color:var(--ink);font:15px/1.62 "Segoe UI",Arial,sans-serif}
+  a{color:var(--green);font-weight:650;text-decoration:none} a:hover{text-decoration:underline}
+  .layout{display:grid;grid-template-columns:250px minmax(0,900px);gap:28px;max-width:1210px;margin:auto;padding:28px}
+  nav{position:sticky;top:20px;align-self:start;background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:20px;box-shadow:0 8px 24px rgba(25,62,50,.07)}
+  nav .brand{font-weight:800;color:var(--green);font-size:17px;margin-bottom:4px}
+  nav .small{color:var(--muted);font-size:12px;margin-bottom:16px}
+  nav a{display:block;padding:8px 10px;border-radius:9px;color:#3e514b;font-size:13px}
+  nav a:hover{background:var(--green2);text-decoration:none}
+  nav .tools{border-top:1px solid var(--line);margin-top:14px;padding-top:14px}
+  main{min-width:0}
+  .hero{background:linear-gradient(125deg,#143d34,#237d62);color:#fff;border-radius:22px;padding:42px;margin-bottom:22px;box-shadow:0 16px 40px rgba(20,61,52,.16)}
+  .eyebrow{text-transform:uppercase;letter-spacing:.12em;font-weight:800;font-size:11px;color:#bde5d7}
+  h1{font-size:38px;line-height:1.13;margin:10px 0 14px}.hero p{max-width:720px;color:#def1ea;margin:0}
+  .hero .meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:24px}.pill{background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.2);border-radius:999px;padding:6px 11px;font-size:12px}
+  section{background:var(--paper);border:1px solid var(--line);border-radius:18px;padding:30px 34px;margin:0 0 20px;box-shadow:0 7px 22px rgba(25,62,50,.05)}
+  h2{font-size:25px;line-height:1.25;margin:0 0 8px} h3{font-size:17px;margin:25px 0 9px;color:var(--green)}
+  p{margin:8px 0 13px} ul,ol{padding-left:24px} li{margin:7px 0}
+  .section-kicker{color:var(--green);font-size:12px;font-weight:850;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
+  .flow{display:flex;align-items:center;gap:7px;flex-wrap:wrap;background:#f7faf8;border:1px solid var(--line);border-radius:13px;padding:14px;margin:16px 0}
+  .flow span{background:#fff;border:1px solid #bdd5cb;border-radius:9px;padding:7px 10px;font-weight:700;font-size:13px}.flow b{color:#80a397}
+  .callout{border-radius:12px;padding:14px 16px;margin:16px 0;border-left:4px solid}
+  .info{background:var(--blue2);border-color:var(--blue)} .warn{background:var(--amber2);border-color:var(--amber)} .danger{background:var(--red2);border-color:var(--red)} .good{background:var(--green2);border-color:var(--green)}
+  pre{background:var(--code);color:#e4f4ee;border-radius:12px;padding:15px 17px;overflow:auto;font:13px/1.55 Consolas,"Courier New",monospace;margin:12px 0}
+  code{font-family:Consolas,"Courier New",monospace;background:#edf3f0;border-radius:5px;padding:1px 5px;color:#21493e} pre code{background:none;color:inherit;padding:0}
+  table{border-collapse:separate;border-spacing:0;width:100%;margin:14px 0;border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:13px}
+  th{background:#edf5f1;text-align:left;color:#21493e} th,td{padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top} tr:last-child td{border-bottom:0}
+  .cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:16px 0}.card{border:1px solid var(--line);border-radius:12px;padding:15px}.card strong{display:block;color:var(--green);margin-bottom:4px}
+  .check{list-style:none;padding:0}.check li{position:relative;padding-left:27px}.check li:before{content:"✓";position:absolute;left:0;top:0;color:var(--green);font-weight:900}
+  .top-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:18px}.button{display:inline-block;padding:9px 13px;border-radius:10px;background:#fff;color:var(--green);border:1px solid #fff;font-size:13px;font-weight:800}.button.secondary{background:transparent;color:#fff;border-color:rgba(255,255,255,.4)}
+  footer{color:var(--muted);font-size:12px;text-align:center;padding:10px 0 30px}
+  @media(max-width:850px){.layout{display:block;padding:14px}nav{position:relative;top:auto;margin-bottom:14px}nav .links{display:grid;grid-template-columns:repeat(2,1fr)}.hero{padding:30px 24px}h1{font-size:31px}section{padding:24px 20px}.cards{grid-template-columns:1fr}table{table-layout:fixed;max-width:100%}th,td{overflow-wrap:anywhere}code{overflow-wrap:anywhere;word-break:break-word}pre code{overflow-wrap:normal;word-break:normal}}
+  @media print{body{background:#fff}.layout{display:block;max-width:none;padding:0}nav,.top-actions{display:none}.hero,section{box-shadow:none;break-inside:avoid}.hero{border-radius:0}section{border-radius:0;margin:0 0 12px}a{color:inherit}}
+</style>
+</head>
+<body>
+<div class="layout">
+  <nav aria-label="Quick start contents">
+    <div class="brand">Practical Quick Start</div>
+    <div class="small">English · field/lab workflow</div>
+    <div class="links">
+      <a href="#start">0. Start the app</a>
+      <a href="#ceres">1. CERES workflow</a>
+      <a href="#spectra">2. Inspect spectra</a>
+      <a href="#cluster">3. Improve clustering</a>
+      <a href="#calibration">4. Build calibration</a>
+      <a href="#results">5. Saved results</a>
+      <a href="#problems">Common problems</a>
+    </div>
+    <div class="tools">
+      <a href="manual.html">Open full manual ↗</a>
+      <a href="QUICK_START_EN.md">Open Markdown version ↗</a>
+      <a href="quick_start_ko.html">Korean version ↗</a>
+    </div>
+  </nav>
+
+  <main>
+    <header class="hero">
+      <div class="eyebrow">15-minute operator guide</div>
+      <h1>Hyperspectral Field Analysis</h1>
+      <p>A click-by-click guide for preparing a CERES entry, inspecting a BIL spectrum, validating clustering, building White/Dark reflectance calibration, and sharing the correct outputs.</p>
+      <div class="meta">
+        <span class="pill">CERES / CBDF</span><span class="pill">ENVI BIL/HDR</span><span class="pill">ROI spectra</span><span class="pill">Reflectance QC</span><span class="pill">HTML + CSV + Excel</span>
+      </div>
+      <div class="top-actions"><a class="button" href="#ceres">Start with CERES</a><a class="button secondary" href="#calibration">Build calibration</a><button class="button secondary" onclick="window.print()">Print guide</button></div>
+    </header>
+
+    <section id="start">
+      <div class="section-kicker">Step 0</div><h2>Start the English interface</h2>
+      <pre><code>cd D:\Research\Hyperspectral\Extract_Spectra_v2
+python -m streamlit run app_en.py</code></pre>
+      <p>The browser normally opens at <code>http://localhost:8501</code>.</p>
+      <ul class="check">
+        <li>Keep each ENVI header and binary together.</li>
+        <li>Use downsampling <strong>4</strong> for a first inspection.</li>
+        <li>Test one file before a whole-folder batch.</li>
+        <li>Remember: raw DN is not reflectance.</li>
+      </ul>
+    </section>
+
+    <section id="ceres">
+      <div class="section-kicker">Workflow 1</div><h2>Prepare and analyse one CERES file</h2>
+      <p><strong>Example:</strong> <code>D:\FieldData\2026-08-21\Plot_001.ceres</code></p>
+      <div class="flow" aria-label="CERES click path"><span>Local Folder</span><b>→</b><span>Single File</span><b>→</b><span>Scan Folder</span><b>→</b><span>Plot_001.ceres</span><b>→</b><span>Read CERES Contents</span><b>→</b><span>Select A / VNIR</span><b>→</b><span>Quick Preview</span><b>→</b><span>Prepare Selected Entry</span></div>
+      <ol>
+        <li><strong>Read CERES Contents</strong> scans record headers and creates a small index without loading the complete file into RAM.</li>
+        <li>Choose the intended acquisition and sensor, such as <code>A / VNIR</code> or <code>A / SWIR</code>.</li>
+        <li><strong>Quick Preview</strong> reads only three bands to confirm that the selected entry is correct.</li>
+        <li><strong>Prepare Selected Entry</strong> streams that entry to a <code>uint16</code> BIL/HDR pair under <code>output/_ceres_cache/</code>.</li>
+        <li>Wait for the green “connected” message, select the analysis/report options, and click <strong>Start Analysis</strong>.</li>
+      </ol>
+      <div class="callout warn"><strong>Current scope:</strong> this is safe, selective preparation of <em>one CERES entry at a time</em>. The current version does not automatically extract every internal entry from every CERES file. Run whole-folder batch analysis on entries already prepared as BIL/HDR.</div>
+      <div class="callout info"><strong>Disk planning:</strong> the interface shows the estimated BIL size and peak RAM before preparation. The BIL cache can be much larger than the original compressed/container representation.</div>
+    </section>
+
+    <section id="spectra">
+      <div class="section-kicker">Workflow 2</div><h2>Load a BIL and inspect a spectrum</h2>
+      <p>For ENVI, keep the pair together and select the header in folder-scan workflows:</p>
+      <pre><code>D:\FieldData\Plot_001.bil
+D:\FieldData\Plot_001.bil.hdr</code></pre>
+      <div class="flow"><span>ROI Spectra</span><b>→</b><span>Select file</span><b>→</b><span>Downsample ×4</span><b>→</b><span>Load</span><b>→</b><span>Zoom</span><b>→</b><span>Box / Lasso / Polygon</span><b>→</b><span>Save CSV</span></div>
+      <ol>
+        <li>Open <strong>ROI Spectra</strong>. Select the file, or use <strong>Enter Path Manually / Browse</strong>.</li>
+        <li>Load at downsampling 4 for the first check.</li>
+        <li>Read the banner: <strong>Reflectance calibration applied</strong> means the graph can show reflectance; <strong>Raw DN</strong> means sensor counts only.</li>
+        <li>Zoom if needed, then define the ROI using Box, Lasso, or Click Polygon.</li>
+        <li>Inspect mean, median, variability, wavelength range, and Y-axis range. Display limits never delete bands from the CSV.</li>
+        <li>With calibration active, switch between <strong>Calibrated Reflectance</strong>, <strong>Raw DN</strong>, and <strong>Raw/Calibrated Comparison</strong>.</li>
+        <li>Choose a path and click <strong>Save CSV</strong>.</li>
+      </ol>
+      <div class="callout good"><strong>Healthy-leaf example:</strong> low red reflectance near 660 nm followed by a strong rise into the NIR is plausible. A sharp unexplained step, extreme value above 1, or discontinuity at a sensor boundary should trigger calibration review—not automatic smoothing.</div>
+    </section>
+
+    <section id="cluster">
+      <div class="section-kicker">Workflow 3</div><h2>Obtain and verify useful clustering</h2>
+      <div class="cards">
+        <div class="card"><strong>First trial</strong>Single File · Downsample 4 · K-Means · 6 clusters · Quick Field QC</div>
+        <div class="card"><strong>Final trial</strong>Reuse reviewed settings · increase resolution only after the preview is satisfactory</div>
+      </div>
+      <p>K-Means is a practical first check for VNIR or SWIR. By default, it clusters raw-DN spectral structure and applies the same masks to calibrated data for reflectance extraction. Hybrid uses reflectance when available because NDVI and brightness thresholds are physically scaled.</p>
+      <h3>Always inspect the image result</h3>
+      <p>Open <strong>Visual Cluster Review</strong> and compare the RGB, cluster colour map, adjustable overlay, boundaries, and isolated-cluster images. A useful result shows spatially coherent leaves, soil, deep shadow, and strongly illuminated regions. Cluster IDs themselves have no biological meaning.</p>
+      <table>
+        <thead><tr><th>Observed problem</th><th>First adjustment</th></tr></thead>
+        <tbody>
+          <tr><td>One leaf becomes many tiny regions</td><td>Reduce the number of clusters.</td></tr>
+          <tr><td>Sunlit and shaded leaves are merged</td><td>Increase clusters, or use Hybrid and tune brightness.</td></tr>
+          <tr><td>Soil and vegetation are merged in VNIR</td><td>Try Hybrid and review the NDVI threshold.</td></tr>
+          <tr><td>SWIR does not contain red + NIR</td><td>Use K-Means or SAM, not Hybrid.</td></tr>
+          <tr><td>Only one local plot is poor</td><td>Use ROI Analysis &amp; Re-clustering for that ROI only.</td></tr>
+          <tr><td>Glare or panel pixels are saturated</td><td>Correct acquisition or mask them; clustering cannot restore clipped signal.</td></tr>
+        </tbody>
+      </table>
+      <div class="callout info"><strong>Decision rule:</strong> do not accept a result only because the colour map looks attractive. Check spectra, cluster area, boundaries, and stability across similar plots.</div>
+    </section>
+
+    <section id="calibration">
+      <div class="section-kicker">Workflow 4</div><h2>Build and apply White/Dark calibration</h2>
+      <p>Here, “white balance” means an empirical-line reflectance calibration for every wavelength:</p>
+      <pre><code>Reflectance = a(wavelength) × DN + b(wavelength)</code></pre>
+      <h3>Use matching acquisitions</h3>
+      <ul>
+        <li>Panel image acquired close in time to the crop scene.</li>
+        <li>Certified values such as <code>0.99</code>, <code>0.50</code>, and <code>0.25</code>.</li>
+        <li>Measured sensor Dark with lens covered or shutter closed.</li>
+        <li>Same sensor, bands, integration time, and gain.</li>
+      </ul>
+      <div class="flow"><span>Panel Calibration</span><b>→</b><span>Load panel image</span><b>→</b><span>Select clean panel ROI</span><b>→</b><span>Enter 0.99 / 0.50 / 0.25</span><b>→</b><span>Add This Region as Panel</span><b>→</b><span>Load Dark</span><b>→</b><span>Calculate Calibration</span></div>
+      <ol>
+        <li>Open <strong>Panel Calibration</strong>, select the reference image, and click <strong>Load</strong>.</li>
+        <li>Drag inside a uniform panel area. Avoid edges, shadows, dirt, and glare.</li>
+        <li>Enter the certified fraction: <code>99% = 0.99</code>, <code>50% = 0.50</code>. Click <strong>Add This Region as Panel</strong> and repeat.</li>
+        <li>Select <strong>Measured Dark File</strong>, choose the matching Dark, and click <strong>Load Dark</strong>. Constant 100 DN is screening-only when no measured Dark exists.</li>
+        <li>Click <strong>Calculate Automatic Reflectance Calibration</strong>.</li>
+        <li>Review reconstructed panel spectra, wavelength-dependent weights, saturation/invalid bands, and QC grade.</li>
+      </ol>
+      <div class="callout info"><strong>Multi-panel rule:</strong> a 50% panel remains 0.50; it is never converted to 0.99. If a bright panel is saturated only in some bands, its weight drops to zero there and a valid lower-reflectance panel can support those bands.</div>
+      <table>
+        <thead><tr><th>QC</th><th>What the software does</th><th>User action</th></tr></thead>
+        <tbody>
+          <tr><td><strong>PASS</strong></td><td>Connects automatically.</td><td>Visually review, then use for analysis.</td></tr>
+          <tr><td><strong>REVIEW</strong></td><td>Connects for trial analysis with warnings.</td><td>Inspect reconstruction and suspect bands before science use.</td></tr>
+          <tr><td><strong>FAIL</strong></td><td>Saves for audit but blocks automatic whole-field use.</td><td>Redefine panel ROIs/Dark and rebuild.</td></tr>
+        </tbody>
+      </table>
+      <p>Saved profile:</p>
+      <pre><code>output/calibration/&lt;panel-image&gt;_weighted_dark_calibration.npz</code></pre>
+      <p>It becomes active immediately when QC permits. Later runs search the source folder and <code>output/calibration/</code>; the sidebar also allows an explicit profile. Confirm the green calibration banner and these exported fields:</p>
+      <pre><code>value_units = reflectance
+calibration_applied = true
+calibration_qc_status = PASS
+normalization_mode = none</code></pre>
+    </section>
+
+    <section id="results">
+      <div class="section-kicker">Workflow 5</div><h2>Understand and share saved results</h2>
+      <pre><code>output/&lt;source-name&gt;/
+|-- report_&lt;timestamp&gt;_&lt;method&gt;.html
+|-- spectra_&lt;method&gt;.csv
+|-- spectra_&lt;method&gt;_reflectance.csv
+|-- spectra_&lt;method&gt;_raw_dn.csv
+|-- spectra_&lt;method&gt;_processed.csv
+|-- processing_manifest.json
+|-- report_config.json
+|-- rgb.png / ndvi.png
+|-- class_map_&lt;method&gt;.png
+|-- cluster_map.png / cluster_overlay.png
+`-- cluster_review.npz</code></pre>
+      <table>
+        <thead><tr><th>Result</th><th>Best use</th></tr></thead>
+        <tbody>
+          <tr><td><code>report_*.html</code></td><td>Primary visual review and easiest field-team deliverable.</td></tr>
+          <tr><td><code>spectra_*_reflectance.csv</code></td><td>Scientific analysis after confirming PASS calibration.</td></tr>
+          <tr><td><code>spectra_*_raw_dn.csv</code></td><td>Acquisition and calibration diagnostics.</td></tr>
+          <tr><td><code>spectra_*_processed.csv</code></td><td>Relative/normalized exploration; not absolute reflectance.</td></tr>
+          <tr><td><code>processing_manifest.json</code></td><td>Source, calibration, normalization, method, and parameter provenance.</td></tr>
+          <tr><td>Cluster maps and overlays</td><td>Spatial validation of clustering.</td></tr>
+          <tr><td><code>daily_report_*.html</code> / <code>daily_summary_*.csv</code></td><td>Whole-batch comparison.</td></tr>
+          <tr><td><code>Field_Results.xlsx</code></td><td>Team/day dashboard, field summary, spectra, and warnings.</td></tr>
+        </tbody>
+      </table>
+      <h3>Recommended sharing package</h3>
+      <ol>
+        <li>Per-file or team HTML report.</li>
+        <li><code>Field_Results.xlsx</code> for a day-level batch, when generated.</li>
+        <li>The calibrated reflectance CSV needed for later statistics.</li>
+        <li><code>processing_manifest.json</code> for traceability.</li>
+      </ol>
+      <ul class="check">
+        <li>Calibration QC is PASS.</li><li>The report says Reflectance, not Raw DN.</li><li>Requested indices were actually calculated.</li><li>Cluster overlay matches meaningful regions.</li><li>No unexplained spectral jump or saturation warning remains.</li>
+      </ul>
+    </section>
+
+    <section id="problems">
+      <div class="section-kicker">Quick help</div><h2>Common problems</h2>
+      <table>
+        <thead><tr><th>Symptom</th><th>Check</th></tr></thead>
+        <tbody>
+          <tr><td>ENVI/BIL will not load</td><td>Keep binary and header together; select the <code>.hdr</code>.</td></tr>
+          <tr><td>CERES analysis cannot start</td><td>Run <strong>Prepare Selected Entry</strong> after selecting an internal entry.</td></tr>
+          <tr><td>Reflectance banner is missing</td><td>Profile may be absent, incompatible, or QC FAIL.</td></tr>
+          <tr><td>NDVI is unavailable</td><td>The scene may lack calibrated red and NIR wavelengths.</td></tr>
+          <tr><td>Spectrum jumps in one range</td><td>Inspect calibration QC, panel weights, saturation, and sensor boundaries.</td></tr>
+          <tr><td>Run is too slow</td><td>Use downsampling 4, test one file, or click <strong>Stop Analysis</strong>.</td></tr>
+        </tbody>
+      </table>
+      <div class="callout good">Need algorithm definitions, CSV columns, or detailed troubleshooting? Open the <a href="manual.html">complete English manual</a>.</div>
+    </section>
+    <footer>Hyperspectral Field Crop Analysis · Practical English Quick Start</footer>
+  </main>
+</div>
+</body>
+</html>

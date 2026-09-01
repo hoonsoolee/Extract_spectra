@@ -406,6 +406,7 @@ pre code { background: none; color: inherit; padding: 0; }
 <nav class="toc-sidebar">
   <h3>Contents</h3>
   <ul>
+    <li><a href="quick_start_en.html">Practical Quick Start ↗</a></li>
     <li><a href="#cover">Overview</a></li>
     <li><a href="#s1">1. Installation</a></li>
     <li><a href="#s2">2. Starting the App</a></li>
@@ -467,7 +468,8 @@ pre code { background: none; color: inherit; padding: 0; }
     <div class="feature-pill">&#x1F4C8; Raw DN + Reflectance Spectra</div>
   </div>
   <div class="meta">
-    Updated: 25 August 2026 &nbsp;|&nbsp; GitHub: <a href="https://github.com/hoonsoolee/Extract_spectra">https://github.com/hoonsoolee/Extract_spectra</a>
+    New user? <a href="quick_start_en.html">Open the Practical Quick Start</a><br>
+    Updated: 30 August 2026 &nbsp;|&nbsp; GitHub: <a href="https://github.com/hoonsoolee/Extract_spectra">https://github.com/hoonsoolee/Extract_spectra</a>
     &nbsp;&nbsp;|&nbsp;&nbsp; Python 3.9+ &nbsp;|&nbsp; Runs on CPU &nbsp;|&nbsp; Windows / macOS / Linux
   </div>
 </div>
@@ -1269,7 +1271,8 @@ cd Extract_spectra</pre>
   <ol class="steps">
     <li><p>Configure all settings in the sidebar: Data Source, Processing Mode, Method, Parameters, and Output Folder.</p></li>
     <li><p>Click the blue <strong>"&#x1F680; Run Analysis"</strong> button at the bottom of the sidebar.</p></li>
-    <li><p>A spinner shows: <em>"Analysing… (may take several minutes for large images)"</em>. Do not close the browser tab while processing.</p></li>
+    <li><p>Analysis runs in a separate worker process, and elapsed time plus the recent log refresh about every two seconds. To cancel, click <strong>"Stop Analysis"</strong> in the sidebar or run-status panel. Only that analysis worker and its child processes are terminated.</p></li>
+    <li><p>Files completed before cancellation remain in the output folder. Do not treat a file being written at the moment of cancellation as a final result; regenerate it in the next run.</p></li>
     <li><p>When done, a green banner appears: <code>&#x2705; Analysis complete! · ⏱ Xs</code>. The elapsed time helps you estimate full batch duration.</p></li>
     <li><p>In <strong>Open Recent Analysis Results</strong>, choose a report and click <strong>Open Selected HTML Report</strong>. You can also open the results folder locally or download the HTML when working on a remote server.</p></li>
     <li><p>Classification map thumbnails appear as a quick preview.</p></li>

@@ -7,7 +7,6 @@ Run with:
     python -m streamlit run app.py
 """
 
-import logging
 import importlib
 import re
 import sys
@@ -40,6 +39,14 @@ from src.path_picker import (
 )
 from src.report_options import REPORT_PRESETS
 from src.local_open import open_local_path as _open_local_path
+from src.analysis_job import (
+    ACTIVE_STATES as _ACTIVE_JOB_STATES,
+    cancel_analysis_job as _cancel_analysis_job,
+    launch_analysis_job as _launch_analysis_job,
+    poll_analysis_job as _poll_analysis_job,
+    read_analysis_result as _read_analysis_result,
+    read_job_log as _read_job_log,
+)
 
 # ============================================================
 # Page config
@@ -52,6 +59,14 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+st.session_state.setdefault("analysis_job", None)
+st.session_state.setdefault("run_timing_history", [])
+st.session_state.setdefault("run_last_timing", None)
+st.session_state.setdefault("run_last_reports", [])
+st.session_state.setdefault("run_last_output_dir", "")
+st.session_state.setdefault("run_last_review_dirs", [])
+st.session_state.setdefault("run_last_team_packages", [])
+
 # Replace Streamlit's filename-based navigation ("app") with research-facing
 # labels that explain what each screen does.
 st.markdown(
@@ -63,19 +78,6 @@ with st.sidebar:
     st.page_link("app.py", label="🌿 전체 필드 자동 분석")
     st.page_link("pages/2_구역별_클러스터링.py", label="🗺️ ROI 구역 분석·재클러스터링")
     st.divider()
-
-# ============================================================
-# Custom log handler – collects records for display
-# ============================================================
-
-class _ListLogHandler(logging.Handler):
-    def __init__(self):
-        super().__init__()
-        self.lines: list[str] = []
-
-    def emit(self, record):
-        self.lines.append(self.format(record))
-
 
 _LOCAL_HSI_EXTS = {".hdr", ".tif", ".tiff", ".h5", ".hdf5", ".mat", ".ceres"}
 _ROI_PLOTLY_CONFIG = {
@@ -142,6 +144,101 @@ def _browse_file_into_state(
             st.session_state["path_picker_notice"] = f"선택됨: {selected}"
     except Exception as exc:
         st.session_state["path_picker_error"] = str(exc)
+
+
+def _apply_completed_analysis_job(job: dict) -> bool:
+    """Move a worker result into the existing result-view session state."""
+    if job.get("result_applied"):
+        return True
+    result = _read_analysis_result(job)
+    timing_record = result.get("timing_record")
+    if not result or not isinstance(timing_record, dict):
+        return False
+
+    st.session_state["run_last_timing"] = timing_record
+    if float(timing_record.get("work_units") or 0.0) > 0:
+        st.session_state["run_timing_history"].append(timing_record)
+        st.session_state["run_timing_history"] = st.session_state[
+            "run_timing_history"
+        ][-30:]
+    st.session_state["run_last_reports"] = list(result.get("reports") or [])
+    st.session_state["run_last_output_dir"] = str(result.get("output_dir") or "")
+    st.session_state["run_last_review_dirs"] = list(
+        result.get("review_dirs") or []
+    )
+    st.session_state["run_last_team_packages"] = list(
+        result.get("team_packages") or []
+    )
+    updated = dict(job)
+    updated["result_applied"] = True
+    st.session_state["analysis_job"] = updated
+    return True
+
+
+@st.fragment(run_every="2s")
+def _render_analysis_job_status() -> None:
+    """Auto-refreshing status panel; remains clickable during computation."""
+    job = st.session_state.get("analysis_job")
+    if not job:
+        return
+    state = _poll_analysis_job(job)
+    state_name = str(state.get("state") or "idle")
+    started_at = float(
+        state.get("started_at") or state.get("launched_at")
+        or job.get("launched_at") or 0.0
+    )
+    elapsed = max(0.0, datetime.datetime.now().timestamp() - started_at) \
+        if started_at else 0.0
+
+    if state_name in _ACTIVE_JOB_STATES:
+        st.info(
+            f"⏳ **분석 실행 중** · 경과 {_format_duration(elapsed)}  "
+            "\n다른 탭을 확인해도 분석은 계속됩니다."
+        )
+        estimate = state.get("estimated_seconds") or job.get("estimated_seconds")
+        if estimate:
+            ratio = min(0.95, elapsed / max(float(estimate), 1.0))
+            st.progress(
+                ratio,
+                text=(
+                    f"예상 {_format_estimate(float(estimate))} · "
+                    "파일 크기와 분석 단계에 따라 달라질 수 있습니다."
+                ),
+            )
+        if st.button(
+            "⏹️ 현재 분석 중지",
+            type="secondary",
+            use_container_width=True,
+            key="stop_analysis_main",
+        ):
+            with st.spinner("분석 프로세스를 중지하고 있습니다..."):
+                _cancel_analysis_job(job)
+            st.rerun()
+    elif state_name == "completed":
+        if not job.get("result_applied"):
+            st.rerun()
+        st.success(
+            "✅ 분석 완료!  ⏱ 실제 총 소요시간: "
+            f"**{_format_duration(float(state.get('elapsed_seconds') or elapsed))}**"
+        )
+    elif state_name == "cancelled":
+        st.warning(
+            "⏹️ 분석이 중지되었습니다. 중지 전에 완성된 파일은 결과 폴더에 "
+            "남아 있으며, 새 분석을 바로 시작할 수 있습니다."
+        )
+    elif state_name == "failed":
+        st.error("❌ 분석 작업이 실패했습니다.")
+        if state.get("error"):
+            with st.expander("오류 상세", expanded=True):
+                st.code(str(state["error"]), language="python")
+
+    log_lines = _read_job_log(job)
+    if log_lines:
+        with st.expander(
+            f"📋 실행 로그 ({len(log_lines)}개 최근 줄)",
+            expanded=state_name == "failed",
+        ):
+            st.code("\n".join(log_lines), language="text")
 
 
 # ============================================================
@@ -1190,7 +1287,24 @@ with st.sidebar:
     verbose = st.checkbox("상세 로그 (DEBUG)", value=False)
 
     st.markdown("---")
-    run_btn = st.button("🚀  분석 시작", type="primary", use_container_width=True)
+    _sidebar_job = st.session_state.get("analysis_job")
+    _sidebar_job_state = _poll_analysis_job(_sidebar_job)
+    _sidebar_job_running = _sidebar_job_state.get("state") in _ACTIVE_JOB_STATES
+    run_btn = st.button(
+        "🚀  분석 시작",
+        type="primary",
+        use_container_width=True,
+        disabled=_sidebar_job_running,
+    )
+    if _sidebar_job_running:
+        st.caption("분석이 별도 프로세스에서 실행 중입니다. 중지 버튼은 즉시 작동합니다.")
+        if st.button(
+            "⏹️ 실행 중지",
+            use_container_width=True,
+            key="stop_analysis_sidebar",
+        ):
+            _cancel_analysis_job(_sidebar_job)
+            st.rerun()
 
 
 # Runtime estimate for the currently configured local job.  GitHub jobs do not
@@ -1201,6 +1315,14 @@ st.session_state.setdefault("run_last_timing", None)
 st.session_state.setdefault("run_last_reports", [])
 st.session_state.setdefault("run_last_output_dir", "")
 st.session_state.setdefault("run_last_review_dirs", [])
+_current_analysis_job = st.session_state.get("analysis_job")
+_current_analysis_state = _poll_analysis_job(_current_analysis_job)
+if (
+    _current_analysis_job
+    and _current_analysis_state.get("state") == "completed"
+    and not _current_analysis_job.get("result_applied")
+):
+    _apply_completed_analysis_job(_current_analysis_job)
 _planned_run_files: list[str] = []
 if data_src == "로컬 폴더":
     if run_mode == "🔍 단일 파일 선택" and _run_single_file:
@@ -1312,6 +1434,8 @@ with tab_run:
     st.markdown("---")
 
     # ── Run ────────────────────────────────────────────────────
+    _render_analysis_job_status()
+
     if run_btn:
 
         # Validate inputs
@@ -1450,104 +1574,29 @@ with tab_run:
             },
         }
 
-        # Attach log handler
-        log_handler = _ListLogHandler()
-        log_handler.setFormatter(
-            logging.Formatter("%(asctime)s  %(levelname)-7s  %(message)s",
-                              datefmt="%H:%M:%S")
-        )
-        root_log = logging.getLogger()
-        root_log.addHandler(log_handler)
-        root_log.setLevel(logging.DEBUG if verbose else logging.INFO)
-
-        # Execute pipeline
-        import time as _time
-        pipeline_ok  = False
-        _elapsed_sec = 0.0
-        _t_wall      = _time.time()   # wall-clock start for file mtime filtering
-        if _run_estimated_seconds is not None:
-            st.info(
-                f"⏳ 분석을 시작합니다. 현재 예상: "
-                f"**{_format_estimate(_run_estimated_seconds)}**"
-            )
+        # The pipeline runs in a child process.  This is essential for a real
+        # Stop button: Streamlit's page process remains free to receive clicks,
+        # poll the status file, and update the log while computation continues.
         try:
-            with st.spinner("⏳ 분석 중...  (데이터 크기에 따라 수 분이 걸릴 수 있습니다)"):
-                import src.radiometry as _run_radiometry
-                import src.preprocessor as _run_preprocessor
-                import src.pipeline as _run_pipeline
-
-                importlib.reload(_run_radiometry)
-                importlib.reload(_run_preprocessor)
-                _run_pipeline = importlib.reload(_run_pipeline)
-                Pipeline = _run_pipeline.Pipeline
-                _t_start = _time.perf_counter()
-                pipeline = Pipeline(cfg)
-                pipeline.run(
-                    labels_csv=labels_csv if labels_csv else None,
-                    file_limit=int(file_limit) if file_limit else None,
-                    single_file=_run_single_file,
-                )
-                _elapsed_sec = _time.perf_counter() - _t_start
-            pipeline_ok = True
-
+            _job = _launch_analysis_job(
+                cfg,
+                labels_csv=labels_csv if labels_csv else None,
+                file_limit=int(file_limit) if file_limit else None,
+                single_file=_run_single_file,
+                timing={
+                    "method": method,
+                    "work_units": _run_work_units,
+                    "file_count": len(_planned_run_files),
+                    "estimated_seconds": _run_estimated_seconds,
+                    "verbose": verbose,
+                },
+                project_root=Path(__file__).parent,
+            )
+            st.session_state["analysis_job"] = _job
+            st.rerun()
         except Exception:
-            st.error("❌ 파이프라인 오류가 발생했습니다.")
+            st.error("❌ 분석 작업을 시작하지 못했습니다.")
             st.code(traceback.format_exc(), language="python")
-
-        finally:
-            root_log.removeHandler(log_handler)
-
-        # Results
-        if pipeline_ok:
-            _elapsed_str = _format_duration(_elapsed_sec)
-            st.success(f"✅ 분석 완료!  ⏱ 실제 총 소요시간: **{_elapsed_str}**")
-            _timing_record = {
-                "method": method,
-                "work_units": _run_work_units,
-                "elapsed_seconds": _elapsed_sec,
-                "file_count": len(_planned_run_files),
-                "estimated_seconds": _run_estimated_seconds,
-            }
-            st.session_state["run_last_timing"] = _timing_record
-            if _run_work_units > 0:
-                st.session_state["run_timing_history"].append(_timing_record)
-                st.session_state["run_timing_history"] = st.session_state[
-                    "run_timing_history"
-                ][-30:]
-
-            out_p = Path(output_dir)
-
-            # Keep only reports produced by this run, then persist their paths
-            # so the access buttons remain visible after Streamlit reruns.
-            reports = sorted(
-                (
-                    p for p in out_p.rglob("*report*.html")
-                    if p.stat().st_mtime >= _t_wall
-                ),
-                key=lambda p: p.stat().st_mtime,
-                reverse=True,
-            )
-            st.session_state["run_last_reports"] = [
-                str(report.resolve()) for report in reports
-            ]
-            st.session_state["run_last_output_dir"] = str(out_p.resolve())
-            st.session_state["run_last_review_dirs"] = [
-                str(Path(summary["result_dir"]).resolve())
-                for summary in pipeline.batch_summaries
-                if summary.get("result_dir")
-                and Path(summary["result_dir"]).is_dir()
-            ]
-            st.session_state["run_last_team_packages"] = list(
-                getattr(pipeline, "team_packages", [])
-            )
-
-        # Log viewer
-        if log_handler.lines:
-            with st.expander(
-                f"📋 실행 로그  ({len(log_handler.lines)} 줄)",
-                expanded=not pipeline_ok,
-            ):
-                st.code("\n".join(log_handler.lines), language="text")
 
     # Persisted result access: clicking a button reruns Streamlit, so this must
     # live outside the one-shot `if run_btn` block.

@@ -23,6 +23,13 @@ cache/
 roi_spectrum.csv
 *.log
 
+# Local presentation build/cache files
+.codex_ppt_build/
+.codex_ppt_en_build/
+presentation/~$*.pptx
+presentation/*.inspect.ndjson
+presentation/hyperspectral_pipeline_presentation_ko/
+
 # Large local acquisitions
 data/
 *.ceres

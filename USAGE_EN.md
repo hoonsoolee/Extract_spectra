@@ -1,5 +1,9 @@
 # Hyperspectral Field Crop Analysis — English Usage Guide
 
+New users should begin with the shorter, click-by-click
+[Practical Quick Start](quick_start_en.html), which includes examples for CERES,
+ROI spectra, clustering review, calibration, and saved results.
+
 ## 1. What the program produces
 
 After a run, the **Open Recent Analysis Results** panel can open the selected
@@ -112,6 +116,13 @@ pipeline; the whole container is never expanded at once.
 5. Use **Hybrid** with the default thresholds and cluster count.
 6. Confirm or create a reflectance calibration before treating the spectra as scientific reflectance.
 7. Run one file and review its class map and report before starting a batch.
+
+Analysis runs in a separate worker process, so the web page remains responsive.
+While it is running, click **Stop Analysis** in the sidebar or run-status panel
+to terminate that worker and its child processes. Files completed before the
+stop remain in the output folder; do not treat a file that was being written at
+the moment of cancellation as a final result. Elapsed time and the recent log
+refresh about every two seconds.
 
 Spatial downsampling reduces the loaded pixel count by approximately the square
 of the factor while retaining the spectral bands. Use `1` for final
