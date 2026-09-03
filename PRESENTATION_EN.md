@@ -1,4 +1,4 @@
-# Hyperspectral Crop Analysis Tool — Presentation Script
+# CanopySpectra — Presentation Script
 
 > Use this as a talking guide when demonstrating the tool to colleagues.
 > Estimated time: 10–15 minutes.
@@ -7,7 +7,7 @@
 
 ## 1. Opening (30 seconds)
 
-*"I'd like to show you a tool we built for analyzing hyperspectral field images of crops.
+*"I'd like to introduce CanopySpectra, a tool we built for analyzing hyperspectral field images of crops.
 The goal is simple: given a raw hyperspectral image, automatically separate pixels into
 meaningful classes — sunlit leaves, shadowed leaves, soil, and background —
 and then extract the average reflectance spectrum for each class.

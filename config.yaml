@@ -1,5 +1,5 @@
 # ============================================================
-# Hyperspectral Field Crop Analysis - Configuration
+# CanopySpectra - Configuration
 # ============================================================
 
 # --- Data Sources ---
@@ -149,6 +149,15 @@ extraction:
   # Increase for smoother averages; decrease if classes are small.
   n_neighbors: 100
 
+  # Preserve actual pixel spectra for plot-level distribution models,
+  # 1D-CNN encoders, DeepSets, or multiple-instance learning.  These rows are
+  # nested observations from one image/plot and are not independent plot labels.
+  sample_export:
+    enabled: true
+    max_per_class: 1000       # deterministic uniform sample from each final cluster
+    random_state: 42
+    save_raw: true            # save raw DN beside reflectance/processed values
+
 # --- Output ---
 output:
   dir: "./output"             # Output directory (created if not exists)
@@ -158,7 +167,7 @@ output:
 
 # --- Report Visualization ---
 report:
-  title: "Hyperspectral Field Crop Analysis"
+  title: "CanopySpectra — Field Hyperspectral Analysis Report"
   author: ""
 
   # quick_qc | research_standard | custom

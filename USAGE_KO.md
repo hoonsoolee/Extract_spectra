@@ -1,4 +1,4 @@
-# 초분광 노지 작물 분석 파이프라인 — 사용 설명서
+# CanopySpectra — 한글 사용 설명서
 
 처음 사용하는 경우에는 CERES, ROI 스펙트럼, 클러스터링 검수, 패널 보정과
 결과파일을 실제 버튼 순서로 설명한 [한국어 실전 빠른 사용법](quick_start_ko.html)을
@@ -6,7 +6,7 @@
 
 ## 개요
 
-이 도구는 초분광 노지 작물 이미지의 픽셀을 자동으로 분류하고 클래스별 반사율 스펙트럼을 추출합니다. 결과는 CSV 파일과 인터랙티브 HTML 리포트로 저장됩니다.
+**From CERES to Science-Ready Field Spectra.** CanopySpectra는 초분광 노지 작물 이미지의 픽셀을 자동으로 분류하고 클래스별 반사율 스펙트럼을 추출합니다. 결과는 CSV 파일과 인터랙티브 HTML 리포트로 저장됩니다.
 
 ---
 
@@ -109,6 +109,7 @@ output/
     ├── spectra_{method}.csv                  # 예: spectra_kmeans.csv
     ├── spectra_{method}_reflectance.csv      # 보정 적용 시 과학용 반사율
     ├── spectra_{method}_raw_dn.csv           # 같은 클러스터의 보정 전 DN
+    ├── spectral_samples.h5                   # 모델용 실제 픽셀 표본과 그룹 정보
     ├── processing_manifest.json              # 보정·정규화·원본 이력
     ├── report_config.json                     # 이번 실행에서 선택한 리포트 항목
     ├── class_map_{method}.png                # 예: class_map_hybrid.png
@@ -177,9 +178,33 @@ scene_001.bil,AP3-4,Control,WT,1,Team A,2026-08-27
 | `spectra_{method}_raw_dn.csv` | 보정 전 센서 DN; 보정 전후 비교와 오류 진단용 |
 | `spectra_{method}_processed.csv` | 보정이 없을 때 정규화/전처리된 상대값; 절대 반사율이 아님 |
 | `spectra_{method}.csv` | 현재 실행에서 추출된 대표 파일; 정확한 단위는 `value_units` 열로 확인 |
+| `spectral_samples.h5` | 클러스터별 실제 픽셀 스펙트럼과 좌표·클래스·가중치·보정 이력; 집합 모델용 |
 | `daily_summary_*.csv` | 배치 파일별 NDVI, 식생 비율, 클래스 수, 품질지표와 처리시간 |
 | `all_roi_cluster_spectra*.csv` | 모든 ROI·클러스터 스펙트럼을 합친 표 |
 | `cluster_summary.csv` | ROI별 클러스터 픽셀 수와 면적 비율(`fraction`, 0–1) |
+
+`spectral_samples.h5`는 기본적으로 최종 클러스터마다 최대 1,000개를 고정 시드로
+비복원 추출합니다. `analysis_values`는 현재 분석값(보정이 적용되었다면 반사율),
+`raw_values`는 같은 픽셀의 원본 DN입니다. `row`/`column`, 원본 해상도 좌표,
+`class_id`, Hybrid의 `base_class_id`, 모집단 복원용 `sample_weight`도 포함됩니다.
+
+이 행들은 한 파일/플랏에 중첩된 픽셀 관측입니다. 동일한 수확량이나 Vcmax 라벨을
+각 행에 붙여 독립 표본처럼 무작위 분할하면 데이터 누수와 과도한 유효 표본 수가
+생깁니다. 파일 또는 `plot_id`를 하나의 스펙트럼 집합으로 사용하고, 데이터 분할도
+반드시 플랏 단위로 수행합니다.
+
+Python에서 확인하는 최소 예시:
+
+```python
+import h5py
+
+with h5py.File("spectral_samples.h5", "r") as f:
+    X = f["analysis_values"][:]       # 표본 수 × 파장 수
+    wavelength = f["analysis_wavelength_nm"][:]
+    cluster_id = f["class_id"][:]
+    base_class_id = f["base_class_id"][:]  # Hybrid: 1=sunlit, 2=shadow, 3=soil
+    weight = f["sample_weight"][:]
+```
 
 각 스펙트럼 파일은 **클래스별·밴드별 7개 통계값**을 포함합니다:
 
@@ -402,4 +427,4 @@ Y축 자동/0–1/직접 입력을 사용할 수 있습니다. 이 설정은 화
 
 ---
 
-*노지 초분광 작물 분석을 위해 개발되었습니다. 문의사항은 연구실로 연락하세요.*
+*CanopySpectra는 노지 초분광 작물 분석을 위해 개발되었습니다. 문의사항은 연구실로 연락하세요.*

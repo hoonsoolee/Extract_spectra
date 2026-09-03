@@ -56,6 +56,7 @@ _SUMMARY_COLUMNS = [
     "davies_bouldin",
     "elapsed_seconds",
     "detail_report",
+    "spectral_samples_file",
     "source_file",
 ]
 

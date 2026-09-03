@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>초분광 작물 분석 도구 — 사용 설명서</title>
+<title>CanopySpectra — 한글 사용 설명서</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { scroll-behavior: smooth; }
@@ -313,8 +313,8 @@ pre code { background: none; color: inherit; padding: 0; }
 <!-- 표지 -->
 <div class="cover" id="cover">
   <div class="badge">사용 설명서</div>
-  <h1>초분광 노지 작물 분석 도구</h1>
-  <p class="subtitle">반사율 보정 · 클러스터링 · ROI 스펙트럼 · 선택형 리포트</p>
+  <h1>CanopySpectra</h1>
+  <p class="subtitle">From CERES to Science-Ready Field Spectra</p>
   <p class="desc">
     이 도구는 대용량 ENVI/BIL 초분광 이미지를 로컬에서 열고,
     White/Dark 또는 다중 반사도 패널을 이용해 반사율로 보정한 뒤
@@ -1439,6 +1439,7 @@ cd Extract_spectra</pre>
     &nbsp;&nbsp;<span class="dir">+-- 이미지_파일명/</span><br>
     &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- spectra_kmeans.csv</span> &nbsp;<span class="comment">← 보정 반사율 스펙트럼과 선택 통계</span><br>
     &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- spectra_kmeans_raw_dn.csv</span> &nbsp;<span class="comment">← 요청 시 저장되는 원본 DN 스펙트럼</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- spectral_samples.h5</span> &nbsp;<span class="comment">← 모델용 실제 픽셀 스펙트럼 집합</span><br>
     &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- class_map_kmeans.png</span> &nbsp;<span class="comment">← 통합 클러스터 맵</span><br>
     &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- rgb_cluster_overlay.png</span> &nbsp;<span class="comment">← RGB와 선택 클러스터 겹쳐보기</span><br>
     &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- ndvi.png / ndre.png / ...</span> &nbsp;<span class="comment">← 사용자가 선택한 지수 이미지만 생성</span><br>
@@ -1471,6 +1472,11 @@ cd Extract_spectra</pre>
         <td><code>spectra_{방법}_processed.csv</code></td>
         <td>보정파일이 없을 때 정규화/전처리된 상대값. 절대 반사율이 아님.</td>
         <td>클러스터 형태 확인에는 사용할 수 있지만 반사율 논문값으로 사용하지 않음.</td>
+      </tr>
+      <tr>
+        <td><code>spectral_samples.h5</code></td>
+        <td>최종 클러스터별 실제 픽셀 스펙트럼, 동일 픽셀의 raw DN, 좌표, Hybrid 기본 클래스, 표본가중치와 보정 이력.</td>
+        <td>한 파일을 하나의 플랏 스펙트럼 집합으로 사용합니다. 픽셀 행을 독립적인 수확량/Vcmax 표본으로 무작위 분할하지 않습니다.</td>
       </tr>
       <tr>
         <td><code>daily_summary_*.csv</code></td>

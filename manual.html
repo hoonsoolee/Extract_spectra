@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Hyperspectral Crop Analysis — User Manual</title>
+<title>CanopySpectra — User Manual</title>
 <style>
 /* ── Reset & Base ─────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -451,8 +451,8 @@ pre code { background: none; color: inherit; padding: 0; }
 <!-- COVER -->
 <div class="cover" id="cover">
   <div class="badge">User Manual</div>
-  <h1>Hyperspectral Field Crop<br>Analysis Tool</h1>
-  <p class="subtitle">Calibration · Clustering · ROI Spectra · Selectable Reports</p>
+  <h1>CanopySpectra</h1>
+  <p class="subtitle">From CERES to Science-Ready Field Spectra</p>
   <p class="desc">
     This tool automatically classifies pixels in hyperspectral field crop images
     and extracts radiometrically traceable class/ROI spectra. It supports
@@ -1551,6 +1551,7 @@ cd Extract_spectra</pre>
     &nbsp;&nbsp;<span class="dir">+-- image_filename/</span><br>
     &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- spectra_kmeans_reflectance.csv</span> &nbsp;<span class="comment">← calibrated spectra</span><br>
     &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- spectra_kmeans_raw_dn.csv</span> &nbsp;<span class="comment">← matching pre-calibration DN</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- spectral_samples.h5</span> &nbsp;<span class="comment">← actual pixel spectral set for modelling</span><br>
     &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- processing_manifest.json</span> &nbsp;<span class="comment">← calibration and processing provenance</span><br>
     &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- report_config.json</span> &nbsp;<span class="comment">← selected report preset and sections</span><br>
     &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">+-- class_map_kmeans.png</span> &nbsp;<span class="comment">← classification map with colour legend</span><br>
@@ -1583,6 +1584,11 @@ cd Extract_spectra</pre>
         <td><code>spectra_{method}_processed.csv</code></td>
         <td>Normalized/processed relative values when calibration is unavailable; not absolute reflectance.</td>
         <td>Useful for checking cluster structure, but not as publication reflectance.</td>
+      </tr>
+      <tr>
+        <td><code>spectral_samples.h5</code></td>
+        <td>Actual spectra per final cluster, matching raw DN, coordinates, Hybrid base class, sampling weights, and calibration provenance.</td>
+        <td>Use each file as one plot-level spectral set. Do not randomly split pixel rows as independent yield/Vcmax samples.</td>
       </tr>
       <tr>
         <td><code>daily_summary_*.csv</code></td>

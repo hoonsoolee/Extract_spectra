@@ -50,7 +50,20 @@ class SelectableReporterTests(unittest.TestCase):
             class_info=class_info,
             spectra=spectra,
             wavelengths=wavelengths,
-            metadata={"format": "ENVI", "calibration": calibration},
+            metadata={
+                "format": "ENVI",
+                "calibration": calibration,
+                "spectral_sample_export": {
+                    "status": "completed",
+                    "file": str(Path("output") / "scene" / "spectral_samples.h5"),
+                    "n_samples": 20,
+                    "raw_values_saved": True,
+                    "classes": [
+                        {"class_name": "Leaf 1", "sampled_count": 12},
+                        {"class_name": "Leaf 2", "sampled_count": 8},
+                    ],
+                },
+            },
             elapsed_sec=1.2,
             index_results=indices,
         )
@@ -71,6 +84,9 @@ class SelectableReporterTests(unittest.TestCase):
 
             self.assertIn("RGB + Cluster Overlay", report_text)
             self.assertIn("NDVI", report_text)
+            self.assertIn("Actual Pixel Spectra for Model Training", report_text)
+            self.assertIn("spectral_samples.h5", report_text)
+            self.assertIn("Do not treat them as independent plot samples", report_text)
             self.assertNotIn("Per-Class Classification Images", report_text)
             self.assertTrue((root / "cluster_overlay.png").exists())
             self.assertTrue((root / "ndvi.png").exists())
