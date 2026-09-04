@@ -1115,6 +1115,19 @@ with st.sidebar:
     save_daily_summary = bool(_report_defaults["daily_summary"])
     save_html_report = True
     save_spectra_csv = True
+    _section_labels = {
+        "rgb": "RGB 이미지",
+        "false_color": "CIR 위색도",
+        "spectral_indices": "선택 식생지수 이미지·요약",
+        "class_map": "클러스터 맵",
+        "cluster_overlay": "RGB+클러스터 오버레이",
+        "per_class_images": "클러스터별 분리 이미지",
+        "class_summary": "클러스터별 픽셀 통계",
+        "spectral_plot": "클러스터별 스펙트럼",
+        "quality_metrics": "클러스터 품질·분리도",
+        "vegetation_quality": "식생 분리도 평가",
+        "calibration_qc": "보정파일·유효밴드 QC",
+    }
 
     with st.expander(
         "리포트 항목 확인·선택",
@@ -1122,27 +1135,15 @@ with st.sidebar:
     ):
         if report_preset != "custom":
             _enabled_sections = [
-                key for key, enabled in report_sections.items() if enabled
+                _section_labels.get(key, key)
+                for key, enabled in report_sections.items() if enabled
             ]
             st.caption(
-                "포함 항목: " + ", ".join(_enabled_sections)
-                + "\n\n스펙트럼 통계: " + ", ".join(report_statistics)
-                + " · 식생지수: " + (", ".join(report_indices) or "없음")
+                "- 포함 항목: " + ", ".join(_enabled_sections)
+                + "\n- 스펙트럼 통계: " + ", ".join(report_statistics)
+                + "\n- 식생지수: " + (", ".join(report_indices) or "없음")
             )
         else:
-            _section_labels = {
-                "rgb": "RGB 이미지",
-                "false_color": "CIR 위색도",
-                "spectral_indices": "선택 식생지수 이미지·요약",
-                "class_map": "클러스터 맵",
-                "cluster_overlay": "RGB+클러스터 오버레이",
-                "per_class_images": "클러스터별 분리 이미지",
-                "class_summary": "클러스터별 픽셀 통계",
-                "spectral_plot": "클러스터별 스펙트럼",
-                "quality_metrics": "클러스터 품질·분리도",
-                "vegetation_quality": "식생 분리도 평가",
-                "calibration_qc": "보정파일·유효밴드 QC",
-            }
             _sc1, _sc2 = st.columns(2)
             for _section_index, (_section_key, _section_label) in enumerate(
                 _section_labels.items()
