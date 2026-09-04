@@ -1,4 +1,4 @@
-# Practical Quick Start — Hyperspectral Field Analysis
+# CanopySpectra — Practical Quick Start
 
 For Korean, open the [Korean practical quick start](quick_start_ko.html).
 
@@ -216,6 +216,7 @@ output/<source-name>/
 |-- spectra_<method>_reflectance.csv
 |-- spectra_<method>_raw_dn.csv
 |-- spectra_<method>_processed.csv
+|-- spectral_samples.h5
 |-- processing_manifest.json
 |-- report_config.json
 |-- rgb.png
@@ -232,11 +233,22 @@ output/<source-name>/
 | `spectra_*_reflectance.csv` | Scientific reflectance analysis after confirming PASS calibration |
 | `spectra_*_raw_dn.csv` | Diagnosing acquisition and calibration differences |
 | `spectra_*_processed.csv` | Relative/normalized exploration when no reflectance calibration exists |
+| `spectral_samples.h5` | Compressed real pixel spectra, coordinates, classes, sampling weights, and optional raw DN for model development |
 | `processing_manifest.json` | Reproducibility: source, calibration, normalization, method, and parameters |
 | `report_config.json` | Which report preset, images, statistics, and indices were requested |
 | `cluster_map/overlay/isolated images` | Checking whether clustering is spatially sensible |
 | `daily_report_*.html` and `daily_summary_*.csv` | Comparing all files from one batch |
 | `Field_Results.xlsx` | Team/day dashboard, field summary, cluster summary, spectra, and warnings |
+
+Use **Actual Spectra for Model Training** in the sidebar to enable the file and
+set the maximum per final cluster. The default is 1,000 spectra sampled without
+replacement using a fixed seed, so the same input and settings select the same
+pixels. Hybrid analysis also records the pre-refinement sunlit/shadow/soil class.
+
+Important: 1,000 pixel rows from one plot are not 1,000 independent yield or
+Vcmax samples. They are repeated observations nested within that plot. Treat the
+file as one **plot-level spectral set**, and split training, validation, and test
+data by plot—not by pixel row.
 
 For a simple research-team delivery, share:
 

@@ -2,7 +2,7 @@
 """
 main.py
 -------
-CLI entry point for the hyperspectral field crop analysis pipeline.
+CLI entry point for CanopySpectra.
 
 Quick start
 -----------
@@ -127,7 +127,7 @@ def merge_cli_into_config(cfg: dict, args: argparse.Namespace) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Hyperspectral field crop analysis – auto spectrum extraction",
+        description="CanopySpectra – from CERES to science-ready field spectra",
         formatter_class=argparse.RawTextHelpFormatter,
     )
 
@@ -246,7 +246,7 @@ def main() -> None:
     # ---- Normal run ----
     from src.pipeline import Pipeline
 
-    log.info("Hyperspectral pipeline starting")
+    log.info("CanopySpectra pipeline starting")
     log.info(f"Config: {args.config}")
     clf_info = cfg.get("classification", {})
     method   = clf_info.get("method", "hybrid")

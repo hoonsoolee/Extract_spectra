@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Adopted the **CanopySpectra** product name and the tagline “From CERES to
+  Science-Ready Field Spectra” across the application, reports, manuals, quick
+  starts, CLI, and Korean/English presentation materials.
+- Optional compressed `spectral_samples.h5` output containing a reproducible,
+  bounded sample of actual spectra from every final cluster, together with
+  coordinates, Hybrid base classes, raw DN, sampling weights, and provenance.
+- Korean and English UI controls and report/manual explanations for using the
+  samples as plot-level spectral sets rather than independent pixel labels.
+- Completed an English-UI audit covering all main tabs, the ROI re-clustering
+  page, container-based widgets, progress messages, runtime estimates, count
+  units, and hidden report settings; added regression checks for composed text.
+
 ## v2.0.0 — 2026-08-27
 
 ### Added

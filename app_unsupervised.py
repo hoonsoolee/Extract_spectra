@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 # ============================================================
 
 st.set_page_config(
-    page_title="Hyperspectral Crop Analysis",
+    page_title="CanopySpectra",
     page_icon="🌿",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -310,7 +310,7 @@ with st.sidebar:
 # Main area
 # ============================================================
 
-st.markdown("# 🌿 Hyperspectral Crop Analysis  —  Unsupervised")
+st.markdown("# 🌿 CanopySpectra — Unsupervised")
 st.caption("Automatic pixel classification · No labels required")
 
 # ── Info banner ───────────────────────────────────────────────
@@ -427,7 +427,7 @@ if run_btn:
             "per_file_report":         run_mode == "📦 Batch (all files)",
         },
         "report": {
-            "title":            "Hyperspectral Field Crop Analysis",
+            "title":            "CanopySpectra — Field Hyperspectral Analysis Report",
             "spectra_show_std": True,
             "lang":             "en",
         },
@@ -515,6 +515,6 @@ if run_btn:
 # ── Footer ─────────────────────────────────────────────────────
 st.markdown("---")
 st.caption(
-    "HyperspectralPipeline · Unsupervised Edition · "
+    "CanopySpectra · Unsupervised Edition · "
     "Methods: hybrid | kmeans | sam | autoencoder | hdbscan | gmm | nmf"
 )

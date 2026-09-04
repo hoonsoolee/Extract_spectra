@@ -33,7 +33,7 @@ class Scene:
 SCENES = [
     Scene(
         None,
-        "Hyperspectral Crop Analysis Pipeline",
+        "CanopySpectra",
         "Recorded from a live run · AP3-4.bil · K-means · 6 clusters",
         4.0,
     ),

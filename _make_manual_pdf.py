@@ -11,7 +11,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.patches import FancyBboxPatch
 import textwrap
 
-OUTPUT = "Hyperspectral_Analysis_User_Manual.pdf"
+OUTPUT = "CanopySpectra_User_Manual.pdf"
 
 # -- Colour palette ------------------------------------------------------------
 C_DARK   = "#1a3a5c"   # header / title
@@ -139,10 +139,10 @@ with PdfPages(OUTPUT) as pdf:
                           boxstyle="square,pad=0", lw=0,
                           facecolor=C_DARK, transform=ax.transAxes, clip_on=False)
     ax.add_patch(rect)
-    ax.text(0.08, 0.93, "Hyperspectral Field Crop", color="white",
+    ax.text(0.08, 0.93, "CanopySpectra", color="white",
             fontsize=26, fontweight="bold", transform=ax.transAxes, va="top")
-    ax.text(0.08, 0.85, "Analysis Tool", color="#a8d8c8",
-            fontsize=22, fontweight="bold", transform=ax.transAxes, va="top")
+    ax.text(0.08, 0.85, "From CERES to Science-Ready Field Spectra", color="#a8d8c8",
+            fontsize=15, fontweight="bold", transform=ax.transAxes, va="top")
     ax.text(0.08, 0.755, "Complete User Manual", color="#b0c4d8",
             fontsize=12, transform=ax.transAxes, va="top")
 
@@ -153,8 +153,8 @@ with PdfPages(OUTPUT) as pdf:
 
     # description block
     desc = (
-        "This manual provides step-by-step instructions for installing and operating the "
-        "Hyperspectral Field Crop Analysis Tool. The tool automatically classifies pixels "
+        "This manual provides step-by-step instructions for installing and operating "
+        "CanopySpectra. The tool automatically classifies pixels "
         "in hyperspectral images into vegetation, shadow, soil, and background classes, "
         "and extracts per-class reflectance spectra -- with no labelled training data required."
     )

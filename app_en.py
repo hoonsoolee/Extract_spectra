@@ -1,7 +1,7 @@
 """
 app_en.py
 ---------
-English presentation of the shared Hyperspectral Field Crop Analysis app.
+English presentation of the shared CanopySpectra app.
 
 The implementation is intentionally executed from ``app.py`` so Korean and
 English users always receive the same CERES, ROI, calibration, clustering, and
@@ -48,7 +48,7 @@ from src.local_open import open_local_path as _open_local_path
 # ============================================================
 
 st.set_page_config(
-    page_title="Hyperspectral Crop Analysis",
+    page_title="CanopySpectra",
     page_icon="🌿",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -696,8 +696,8 @@ st.session_state.setdefault("run_last_output_dir", "")
 # Main area
 # ============================================================
 
-st.markdown("# 🌿 Hyperspectral Field Crop Analysis Pipeline")
-st.caption("Hyperspectral Field Crop Analysis · Automatic Spectrum Extraction System")
+st.markdown("# 🌿 CanopySpectra")
+st.caption("From CERES to Science-Ready Field Spectra")
 
 tab_run, tab_label = st.tabs(["🚀 Run Analysis", "🏷️ Pixel Labeling"])
 
@@ -845,7 +845,7 @@ with tab_run:
                 "per_file_report":         run_mode == "📦 Batch (all files)",
             },
             "report": {
-                "title":            "Hyperspectral Field Crop Analysis",
+                "title":            "CanopySpectra — Field Hyperspectral Analysis Report",
                 "preset":           report_preset,
                 "sections":         report_sections,
                 "spectra_statistics": report_statistics,
@@ -1425,6 +1425,6 @@ with tab_label:
 # ── Footer ─────────────────────────────────────────────────────
 st.markdown("---")
 st.caption(
-    "HyperspectralPipeline · "
+    "CanopySpectra · "
     "Methods: hybrid | kmeans | sam | supervised | autoencoder | cnn"
 )

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Practical Quick Start — Hyperspectral Field Analysis</title>
+<title>CanopySpectra — Practical Quick Start</title>
 <style>
   :root {
     --ink:#18302b; --muted:#64746f; --green:#176b55; --green2:#e8f4ef;
@@ -49,7 +49,7 @@
 <body>
 <div class="layout">
   <nav aria-label="Quick start contents">
-    <div class="brand">Practical Quick Start</div>
+    <div class="brand">CanopySpectra</div>
     <div class="small">English · field/lab workflow</div>
     <div class="links">
       <a href="#start">0. Start the app</a>
@@ -70,7 +70,8 @@
   <main>
     <header class="hero">
       <div class="eyebrow">15-minute operator guide</div>
-      <h1>Hyperspectral Field Analysis</h1>
+      <h1>CanopySpectra</h1>
+      <p><strong>From CERES to Science-Ready Field Spectra</strong></p>
       <p>A click-by-click guide for preparing a CERES entry, inspecting a BIL spectrum, validating clustering, building White/Dark reflectance calibration, and sharing the correct outputs.</p>
       <div class="meta">
         <span class="pill">CERES / CBDF</span><span class="pill">ENVI BIL/HDR</span><span class="pill">ROI spectra</span><span class="pill">Reflectance QC</span><span class="pill">HTML + CSV + Excel</span>
@@ -193,6 +194,7 @@ normalization_mode = none</code></pre>
 |-- spectra_&lt;method&gt;_reflectance.csv
 |-- spectra_&lt;method&gt;_raw_dn.csv
 |-- spectra_&lt;method&gt;_processed.csv
+|-- spectral_samples.h5
 |-- processing_manifest.json
 |-- report_config.json
 |-- rgb.png / ndvi.png
@@ -206,12 +208,14 @@ normalization_mode = none</code></pre>
           <tr><td><code>spectra_*_reflectance.csv</code></td><td>Scientific analysis after confirming PASS calibration.</td></tr>
           <tr><td><code>spectra_*_raw_dn.csv</code></td><td>Acquisition and calibration diagnostics.</td></tr>
           <tr><td><code>spectra_*_processed.csv</code></td><td>Relative/normalized exploration; not absolute reflectance.</td></tr>
+          <tr><td><code>spectral_samples.h5</code></td><td>Compressed actual pixel spectra, coordinates, classes, sampling weights, and optional raw DN for model development.</td></tr>
           <tr><td><code>processing_manifest.json</code></td><td>Source, calibration, normalization, method, and parameter provenance.</td></tr>
           <tr><td>Cluster maps and overlays</td><td>Spatial validation of clustering.</td></tr>
           <tr><td><code>daily_report_*.html</code> / <code>daily_summary_*.csv</code></td><td>Whole-batch comparison.</td></tr>
           <tr><td><code>Field_Results.xlsx</code></td><td>Team/day dashboard, field summary, spectra, and warnings.</td></tr>
         </tbody>
       </table>
+      <div class="callout info"><strong>Model-ready spectral sets:</strong> enable <strong>Actual Spectra for Model Training</strong> in the sidebar. The default reproducibly samples up to 1,000 pixels from each final cluster. Hybrid analysis also records the original sunlit/shadow/soil class. Pixel rows from one image are nested observations, not independent yield or Vcmax samples; group and split them by file or plot ID.</div>
       <h3>Recommended sharing package</h3>
       <ol>
         <li>Per-file or team HTML report.</li>
@@ -239,7 +243,7 @@ normalization_mode = none</code></pre>
       </table>
       <div class="callout good">Need algorithm definitions, CSV columns, or detailed troubleshooting? Open the <a href="manual.html">complete English manual</a>.</div>
     </section>
-    <footer>Hyperspectral Field Crop Analysis · Practical English Quick Start</footer>
+    <footer>CanopySpectra · Practical English Quick Start</footer>
   </main>
 </div>
 </body>

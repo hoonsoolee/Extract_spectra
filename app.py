@@ -1,7 +1,7 @@
 """
 app.py
 ------
-Streamlit GUI for the Hyperspectral Field Crop Analysis Pipeline.
+Streamlit GUI for CanopySpectra.
 
 Run with:
     python -m streamlit run app.py
@@ -53,7 +53,7 @@ from src.analysis_job import (
 # ============================================================
 
 st.set_page_config(
-    page_title="초분광 작물 분석",
+    page_title="CanopySpectra",
     page_icon="🌿",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -1115,6 +1115,19 @@ with st.sidebar:
     save_daily_summary = bool(_report_defaults["daily_summary"])
     save_html_report = True
     save_spectra_csv = True
+    _section_labels = {
+        "rgb": "RGB 이미지",
+        "false_color": "CIR 위색도",
+        "spectral_indices": "선택 식생지수 이미지·요약",
+        "class_map": "클러스터 맵",
+        "cluster_overlay": "RGB+클러스터 오버레이",
+        "per_class_images": "클러스터별 분리 이미지",
+        "class_summary": "클러스터별 픽셀 통계",
+        "spectral_plot": "클러스터별 스펙트럼",
+        "quality_metrics": "클러스터 품질·분리도",
+        "vegetation_quality": "식생 분리도 평가",
+        "calibration_qc": "보정파일·유효밴드 QC",
+    }
 
     with st.expander(
         "리포트 항목 확인·선택",
@@ -1122,27 +1135,15 @@ with st.sidebar:
     ):
         if report_preset != "custom":
             _enabled_sections = [
-                key for key, enabled in report_sections.items() if enabled
+                _section_labels.get(key, key)
+                for key, enabled in report_sections.items() if enabled
             ]
             st.caption(
-                "포함 항목: " + ", ".join(_enabled_sections)
-                + "\n\n스펙트럼 통계: " + ", ".join(report_statistics)
-                + " · 식생지수: " + (", ".join(report_indices) or "없음")
+                "- 포함 항목: " + ", ".join(_enabled_sections)
+                + "\n- 스펙트럼 통계: " + ", ".join(report_statistics)
+                + "\n- 식생지수: " + (", ".join(report_indices) or "없음")
             )
         else:
-            _section_labels = {
-                "rgb": "RGB 이미지",
-                "false_color": "CIR 위색도",
-                "spectral_indices": "선택 식생지수 이미지·요약",
-                "class_map": "클러스터 맵",
-                "cluster_overlay": "RGB+클러스터 오버레이",
-                "per_class_images": "클러스터별 분리 이미지",
-                "class_summary": "클러스터별 픽셀 통계",
-                "spectral_plot": "클러스터별 스펙트럼",
-                "quality_metrics": "클러스터 품질·분리도",
-                "vegetation_quality": "식생 분리도 평가",
-                "calibration_qc": "보정파일·유효밴드 QC",
-            }
             _sc1, _sc2 = st.columns(2)
             for _section_index, (_section_key, _section_label) in enumerate(
                 _section_labels.items()
@@ -1191,6 +1192,43 @@ with st.sidebar:
                 "NDVI/GNDVI/NDRE/PRI는 보정 반사율에서만 계산합니다. "
                 "보정이 없거나 필요한 파장이 없으면 리포트에 계산 불가 이유를 기록합니다."
             )
+
+    model_spectra_enabled = True
+    model_spectra_per_class = 1_000
+    model_spectra_save_raw = True
+    with st.expander("🧬 모델 학습용 실제 스펙트럼", expanded=False):
+        model_spectra_enabled = st.checkbox(
+            "클러스터별 실제 픽셀 스펙트럼 저장 (.h5)",
+            value=True,
+            key="model_spectra_enabled",
+            help=(
+                "평균이나 median이 아니라 클러스터를 구성한 실제 픽셀 스펙트럼을 "
+                "저장합니다. 각 영상/플랏 안의 픽셀은 서로 독립적인 플랏 라벨이 아닙니다."
+            ),
+        )
+        model_spectra_per_class = st.number_input(
+            "클러스터별 최대 스펙트럼 수",
+            min_value=10,
+            max_value=10_000,
+            value=1_000,
+            step=100,
+            key="model_spectra_per_class",
+            disabled=not model_spectra_enabled,
+            help=(
+                "각 최종 클러스터에서 고정 난수 시드로 비복원 표본추출합니다. "
+                "Hybrid 분석은 sunlit/shadow/soil 기본 구분도 파일에 함께 기록합니다."
+            ),
+        )
+        model_spectra_save_raw = st.checkbox(
+            "보정/분석값과 raw DN을 함께 저장",
+            value=True,
+            key="model_spectra_save_raw",
+            disabled=not model_spectra_enabled,
+        )
+        st.caption(
+            "결과 폴더의 spectral_samples.h5에는 파장축, 픽셀 좌표, 최종 "
+            "클러스터, Hybrid 기본 클래스, 표본가중치와 보정 이력이 포함됩니다."
+        )
 
     with st.expander(
         "👥 팀·플랏 일일 통합 리포트",
@@ -1351,8 +1389,8 @@ if _planned_run_files:
 # Main area
 # ============================================================
 
-st.markdown("# 🌿 초분광 작물 분석 파이프라인")
-st.caption("Hyperspectral Field Crop Analysis · 자동 스펙트럼 추출 시스템")
+st.markdown("# 🌿 CanopySpectra")
+st.caption("From CERES to Science-Ready Field Spectra")
 
 tab_run, tab_roi, tab_panel, tab_label = st.tabs(
     ["🚀 분석 실행", "📈 ROI 스펙트럼", "🎯 패널 보정", "🏷️ 픽셀 라벨링"]
@@ -1548,6 +1586,15 @@ with tab_run:
                     "random_state": 42,
                 },
             },
+            "extraction": {
+                "n_neighbors": 100,
+                "sample_export": {
+                    "enabled": bool(model_spectra_enabled),
+                    "max_per_class": int(model_spectra_per_class),
+                    "random_state": 42,
+                    "save_raw": bool(model_spectra_save_raw),
+                },
+            },
             "output": {
                 "dir":                     output_dir,
                 "save_classification_map": bool(report_sections.get("class_map")),
@@ -1556,7 +1603,7 @@ with tab_run:
                 "per_file_report":         run_mode == "📦 전체 배치 처리",
             },
             "report": {
-                "title":            "Hyperspectral Field Crop Analysis",
+                "title":            "CanopySpectra — Field Hyperspectral Analysis Report",
                 "preset":           report_preset,
                 "sections":         report_sections,
                 "spectra_statistics": report_statistics,
@@ -4826,6 +4873,6 @@ with tab_label:
 # ── Footer ─────────────────────────────────────────────────────
 st.markdown("---")
 st.caption(
-    "HyperspectralPipeline · "
+    "CanopySpectra · "
     "방법: hybrid | kmeans | sam | supervised | autoencoder | cnn"
 )

@@ -1,4 +1,6 @@
-# Hyperspectral Field Crop Analysis
+# CanopySpectra
+
+**From CERES to Science-Ready Field Spectra**
 
 Current release: **v2.0.0**
 
@@ -16,6 +18,8 @@ load time. The web UI can index, preview, and selectively demultiplex both the
 - White/Dark or weighted multi-panel reflectance calibration
 - Automatic discovery of a compatible calibration profile per image
 - Raw-DN and calibrated-reflectance spectra saved side by side
+- Reproducible compressed HDF5 export of actual sampled pixel spectra, spatial
+  coordinates, final clusters, Hybrid base classes, sampling weights, and raw DN
 - Hybrid, K-Means, SAM, HDBSCAN, GMM, NMF, Random Forest, autoencoder, and 1D-CNN methods
 - One global clustering model with separate spectra for each user-defined ROI
 - Box, lasso, and click-by-click polygon ROIs
@@ -74,3 +78,9 @@ tables report `value_units=reflectance`, `calibration_applied=true`, and
 `normalization_mode=none`. A synthetic constant Dark is supported for rapid
 screening, but a measured sensor Dark with matching acquisition settings is
 recommended for final scientific results.
+
+For downstream plot-level machine learning, keep the plot as the statistical
+unit. `spectral_samples.h5` preserves a configurable number of real spectra per
+cluster, but those pixel rows are nested observations from one image/plot—not
+independent yield or Vcmax labels. Group them by source file or plot ID when
+building 1D-CNN, DeepSets, attention-pooling, or multiple-instance models.

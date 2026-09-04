@@ -1,4 +1,4 @@
-# 실전 빠른 사용법 — 초분광 필드 분석
+# CanopySpectra — 한글 실전 빠른 사용법
 
 이 문서는 처음 프로그램을 사용하는 연구자가 긴 설명서를 모두 읽지 않고도
 실제 분석을 한 번 수행할 수 있도록 만든 따라 하기 안내서입니다.
@@ -208,6 +208,7 @@ output/<원본파일명>/
 |-- spectra_<방법>_reflectance.csv
 |-- spectra_<방법>_raw_dn.csv
 |-- spectra_<방법>_processed.csv
+|-- spectral_samples.h5
 |-- processing_manifest.json
 |-- report_config.json
 |-- rgb.png
@@ -224,11 +225,21 @@ output/<원본파일명>/
 | `spectra_*_reflectance.csv` | PASS 보정 확인 후 과학 분석에 사용하는 반사율 |
 | `spectra_*_raw_dn.csv` | 촬영 및 보정 전후 문제 진단 |
 | `spectra_*_processed.csv` | 보정이 없을 때의 상대/정규화 값. 절대 반사율이 아님 |
+| `spectral_samples.h5` | 클러스터별 실제 픽셀 스펙트럼, 좌표, 클래스, 가중치와 raw DN을 압축 저장한 모델 개발용 파일 |
 | `processing_manifest.json` | 원본, 보정, 정규화, 방법과 설정의 재현 기록 |
 | `report_config.json` | 이번 리포트에서 선택한 이미지·통계·지수 항목 |
 | 클러스터맵·오버레이 | 공간적으로 클러스터링이 타당한지 확인 |
 | `daily_report_*.html`, `daily_summary_*.csv` | 한 번의 배치에 포함된 모든 파일 비교 |
 | `Field_Results.xlsx` | 팀/측정일 대시보드, 필드 요약, 스펙트럼과 경고 |
+
+왼쪽의 **모델 학습용 실제 스펙트럼**에서 저장 여부와 클러스터별 최대 개수를
+정합니다. 기본값은 각 최종 클러스터에서 1,000개를 고정 난수 시드로 비복원
+표본추출하는 것입니다. 같은 입력과 설정이면 같은 픽셀이 선택됩니다. Hybrid를
+사용하면 최종 클러스터뿐 아니라 원래의 sunlit/shadow/soil 구분도 함께 저장됩니다.
+
+중요: 이 파일의 1,000개 픽셀은 1,000개의 독립적인 수확량/Vcmax 표본이 아닙니다.
+모두 한 영상(한 플랏)에 속하는 반복 관측이므로 모델에서는 **파일/plot_id별 하나의
+스펙트럼 집합**으로 묶고, 학습·검증·시험 분할도 플랏 단위로 해야 합니다.
 
 연구팀에는 다음 자료를 우선 전달하는 것이 간단합니다.
 

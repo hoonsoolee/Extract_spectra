@@ -1,8 +1,12 @@
-# Hyperspectral Field Crop Analysis — English Usage Guide
+# CanopySpectra — English Usage Guide
 
 New users should begin with the shorter, click-by-click
 [Practical Quick Start](quick_start_en.html), which includes examples for CERES,
 ROI spectra, clustering review, calibration, and saved results.
+
+**From CERES to Science-Ready Field Spectra.** CanopySpectra turns raw field
+hyperspectral imagery into calibrated spectra, reviewable cluster products, and
+reproducible reports.
 
 ## 1. What the program produces
 
@@ -206,6 +210,7 @@ output/
     ├── spectra_<method>.csv
     ├── spectra_<method>_reflectance.csv   # when calibration was applied
     ├── spectra_<method>_raw_dn.csv
+    ├── spectral_samples.h5                # actual pixel samples and grouping metadata
     ├── processing_manifest.json
     ├── report_config.json
     ├── rgb.png / ndvi.png                 # when selected
@@ -271,9 +276,34 @@ than a single `.xlsx` workbook. Each spectral row represents one wavelength.
 | `spectra_<method>_raw_dn.csv` | Original sensor DN for diagnostics and before/after comparison |
 | `spectra_<method>_processed.csv` | Normalized/processed relative values when no calibration is available; not absolute reflectance |
 | `spectra_<method>.csv` | Main extraction from the current run; verify its scale in `value_units` |
+| `spectral_samples.h5` | Real per-cluster pixel spectra with coordinates, classes, weights, and calibration provenance for set models |
 | `daily_summary_*.csv` | Per-file NDVI, vegetation fraction, class count, quality metrics, and elapsed time |
 | `all_roi_cluster_spectra*.csv` | Combined spectra for all ROIs and clusters |
 | `cluster_summary.csv` | Pixel count and area fraction (`fraction`, 0–1) for each ROI cluster |
+
+By default, `spectral_samples.h5` samples up to 1,000 pixels from each final
+cluster without replacement using a fixed seed. `analysis_values` contains the
+current analysis scale (reflectance when calibrated), while `raw_values`
+contains raw DN for the same pixels. It also stores image and source-resolution
+coordinates, `class_id`, Hybrid `base_class_id`, `sample_weight`, and provenance.
+
+These rows are pixel observations nested within one source image/plot. Assigning
+the same yield or Vcmax label to every row and randomly splitting rows would
+cause leakage and pseudo-replication. Use each file or `plot_id` as one spectral
+set, and split training, validation, and test data at the plot level.
+
+Minimal Python inspection example:
+
+```python
+import h5py
+
+with h5py.File("spectral_samples.h5", "r") as f:
+    X = f["analysis_values"][:]       # samples × wavelengths
+    wavelength = f["analysis_wavelength_nm"][:]
+    cluster_id = f["class_id"][:]
+    base_class_id = f["base_class_id"][:]  # Hybrid: 1=sunlit, 2=shadow, 3=soil
+    weight = f["sample_weight"][:]
+```
 
 Each class contains:
 

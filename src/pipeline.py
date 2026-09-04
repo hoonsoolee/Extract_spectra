@@ -175,6 +175,7 @@ class Pipeline:
                 "calibration_qc_status", "n_classes", "ndvi_mean", "ndvi_median",
                 "ndvi_q25", "ndvi_q75", "vegetation_fraction", "silhouette",
                 "davies_bouldin", "elapsed_seconds", "detail_report",
+                "spectral_samples_file",
             ]
             with csv_path.open("w", newline="", encoding="utf-8-sig") as stream:
                 writer = csv.DictWriter(stream, fieldnames=columns, extrasaction="ignore")
@@ -240,6 +241,25 @@ class Pipeline:
         )
         logger.info(f"  Preprocess: {time.time()-t0:.2f}s")
 
+        # ENVI is downsampled by the memory-mapped loader, while TIFF/HDF5/MAT
+        # cubes are downsampled by the preprocessor.  Keep a spatially aligned
+        # raw-DN view so the same class mask and sampled pixel coordinates can
+        # be applied to both products.
+        raw_analysis_data = raw_data
+        spatial_factor = max(
+            1,
+            int(self.config.get("preprocessing", {}).get("spatial_downsample", 1)),
+        )
+        if raw_analysis_data.shape[:2] != data.shape[:2]:
+            candidate = raw_analysis_data[::spatial_factor, ::spatial_factor, :]
+            if candidate.shape[:2] != data.shape[:2]:
+                raise ValueError(
+                    "Raw and processed cube dimensions cannot be aligned: "
+                    f"raw={raw_analysis_data.shape[:2]}, processed={data.shape[:2]}, "
+                    f"downsample={spatial_factor}"
+                )
+            raw_analysis_data = candidate
+
         # ---- 3. Classify ----
         t0 = time.time()
         method = str(
@@ -276,7 +296,7 @@ class Pipeline:
             cluster_preprocessing["spatial_downsample"] = 1
             cluster_preprocessor = Preprocessor(cluster_config)
             cluster_data, cluster_wavelengths = cluster_preprocessor.process(
-                raw_data,
+                raw_analysis_data,
                 raw_wavelengths,
                 skip_downsample=True,
                 source_path=str(file_ref),
@@ -318,7 +338,7 @@ class Pipeline:
         t0 = time.time()
         spectra = self.extr.extract(data, class_map, class_info, wavelengths)
         raw_spectra = self.extr.extract(
-            raw_data, class_map, class_info, raw_wavelengths
+            raw_analysis_data, class_map, class_info, raw_wavelengths
         )
         logger.info(f"  Extract spectra: {time.time()-t0:.2f}s")
 
@@ -357,19 +377,20 @@ class Pipeline:
         file_out_dir = self.output_dir / stem
         file_out_dir.mkdir(parents=True, exist_ok=True)
 
+        calibration_info = self.prep.last_calibration_info
+        effective_normalization = self.prep.last_effective_normalize_mode
+        analysis_value_units = (
+            "reflectance"
+            if calibration_info
+            else "raw DN" if effective_normalization == "none"
+            else f"normalized ({effective_normalization})"
+        )
+
         if out_cfg.get("save_spectra_csv", True):
             csv_name = f"spectra_{method}.csv"
-            calibration_info = self.prep.last_calibration_info
-            effective_normalization = self.prep.last_effective_normalize_mode
-            corrected_units = (
-                "reflectance"
-                if calibration_info
-                else "raw DN" if effective_normalization == "none"
-                else f"normalized ({effective_normalization})"
-            )
             corrected_provenance = {
                 "source_file": str(file_ref),
-                "value_units": corrected_units,
+                "value_units": analysis_value_units,
                 "normalization_mode": effective_normalization,
                 "calibration_info": calibration_info,
                 "calibration_applied": bool(calibration_info),
@@ -418,13 +439,10 @@ class Pipeline:
             "normalization": self.prep.last_effective_normalize_mode,
             "requested_normalization": self.config.get("preprocessing", {}).get("normalize_mode", "global"),
             "calibration": self.prep.last_calibration_info,
-            "value_units": (
-                "reflectance"
-                if self.prep.last_calibration_info
-                else "raw DN"
-                if self.prep.last_effective_normalize_mode == "none"
-                else f"normalized ({self.prep.last_effective_normalize_mode})"
-            ),
+            "value_units": analysis_value_units,
+            "preprocessing_config": deepcopy(self.config.get("preprocessing", {})),
+            "classification_config": deepcopy(self.config.get("classification", {})),
+            "extraction_config": deepcopy(self.config.get("extraction", {})),
             "raw_spectra_file": (
                 f"spectra_{method}_raw_dn.csv"
                 if out_cfg.get("save_spectra_csv", True) else None
@@ -448,6 +466,63 @@ class Pipeline:
                 for name, result in index_results.items()
             },
         }
+
+        sample_cfg = self.config.get("extraction", {}).get("sample_export", {})
+        sample_export = {"enabled": bool(sample_cfg.get("enabled", False))}
+        if sample_export["enabled"]:
+            try:
+                from .spectral_samples import export_spectral_samples
+
+                calibration_meta = (calibration_info or {}).get("meta") or {}
+                sample_export = {
+                    "enabled": True,
+                    "status": "completed",
+                    **export_spectral_samples(
+                        file_out_dir / "spectral_samples.h5",
+                        analysis_data=data,
+                        raw_data=raw_analysis_data,
+                        class_map=class_map,
+                        class_info=class_info,
+                        analysis_wavelengths=wavelengths,
+                        raw_wavelengths=raw_wavelengths,
+                        base_class_map=getattr(self.clf, "last_base_class_map", None),
+                        max_per_class=int(sample_cfg.get("max_per_class", 1_000)),
+                        random_state=int(sample_cfg.get("random_state", 42)),
+                        spatial_downsample=spatial_factor,
+                        value_units=analysis_value_units,
+                        save_raw=bool(sample_cfg.get("save_raw", True)),
+                        provenance={
+                            "source_file": manifest["source_file"],
+                            "method": method,
+                            "clustering_input": self.last_cluster_input_space,
+                            "calibration_profile": (
+                                (calibration_info or {}).get("selected_profile") or ""
+                            ),
+                            "calibration_qc_status": str(
+                                calibration_meta.get("qc_status") or "UNASSESSED"
+                            ).upper(),
+                            "calibration": calibration_info or {},
+                            "preprocessing_config": self.config.get(
+                                "preprocessing", {}
+                            ),
+                            "classification_config": self.config.get(
+                                "classification", {}
+                            ),
+                        },
+                    ),
+                }
+                logger.info(
+                    "  Model spectral samples saved: %s spectra",
+                    f"{sample_export['n_samples']:,}",
+                )
+            except Exception as exc:
+                sample_export = {
+                    "enabled": True,
+                    "status": "failed",
+                    "error": str(exc),
+                }
+                logger.error("  Spectral sample export failed: %s", exc)
+        manifest["spectral_sample_export"] = sample_export
         (file_out_dir / "processing_manifest.json").write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
         )
@@ -516,7 +591,11 @@ class Pipeline:
                 class_info=class_info,
                 spectra=spectra,
                 wavelengths=wavelengths,
-                metadata={**meta, "calibration": self.prep.last_calibration_info},
+                metadata={
+                    **meta,
+                    "calibration": self.prep.last_calibration_info,
+                    "spectral_sample_export": sample_export,
+                },
                 metrics=metrics,
                 separability=sep,
                 veg_sep=veg_sep,
@@ -577,6 +656,11 @@ class Pipeline:
             "cluster_review_file": str(
                 (file_out_dir / "cluster_review.npz").resolve()
             ) if cluster_review_assets else "",
+            "spectral_samples_file": (
+                str(Path(sample_export["file"]).resolve())
+                if sample_export.get("status") == "completed"
+                and sample_export.get("file") else ""
+            ),
         }
 
     # ============================================================
